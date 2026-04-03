@@ -1,0 +1,179 @@
+---
+title: "Beaker notebook"
+description: "An AI-powered, Jupyter-compatible notebook environment built into Terarium for programmatic access to models, datasets, and simulations."
+---
+
+Beaker is the interactive notebook environment embedded in Terarium. It combines a standard Jupyter kernel with an AI chat assistant and direct access to every asset in your project, letting you write Python, explore data, run simulations, and save results — all without leaving the platform.
+
+Under the hood, Beaker runs as its own Docker service (`ghcr.io/darpa-askem/askem-beaker:latest`) that connects to the HMI server, MIRA, and the PyCIEMSS simulation scheduler. The front-end communicates with Beaker over the standard Jupyter WebSocket protocol using `@jupyterlab` packages.
+
+---
+
+## Accessing the notebook
+
+The Beaker notebook is available on any operator drilldown that supports programmatic interaction (such as Simulate, Calibrate, Stratify MIRA, and Dataset panels). Look for the **notebook tab** or the **Beaker / TGPT** button in the drilldown header.
+
+<Steps>
+  <Step title="Open an operator drilldown">
+    Double-click an operator node in the workflow canvas to open its drilldown panel.
+  </Step>
+  <Step title="Switch to the notebook view">
+    Select the notebook tab (labelled "Notebook" or "Code") in the drilldown header. A Jupyter session starts automatically in the background.
+  </Step>
+  <Step title="Interact with the AI or write code directly">
+    Use the chat input to describe what you want to do in plain language, or click **Add a cell** to write Python directly.
+  </Step>
+</Steps>
+
+<Note>
+Each operator session is isolated. Closing the drilldown shuts down that session's kernel. Notebook history is persisted through the `NotebookSession` service so your code and results survive page reloads.
+</Note>
+
+---
+
+## The notebook interface
+
+### AI chat input
+
+The chat bar at the bottom of the notebook panel accepts plain-language requests. When you submit a prompt, Beaker sends an `llm_request` message to the kernel. The kernel:
+
+1. Passes your request and the current context to the LLM (OpenAI, configured via `OPENAI_API_KEY`).
+2. Returns `llm_thought` messages (reasoning steps) followed by `llm_response` with generated code.
+3. Automatically executes the generated code cell.
+
+You can re-run or edit any previous prompt using the controls on each cell.
+
+### Code cells
+
+Code cells use the **Ace editor** with syntax highlighting for Python (and R when the `ir` kernel is selected). Each cell shows its execution counter (`In [n]`) and supports:
+
+- **Run** (`Ctrl+Enter` or the play button) — executes only this cell.
+- **Rerun all cells** — re-executes every cell in order, with a 1-second delay between cells to preserve execution order.
+- **Delete** — removes the cell after a confirmation prompt.
+
+### Keyboard navigation (command mode)
+
+When the notebook container is focused (click outside any cell), use these keys:
+
+| Key | Action |
+|-----|--------|
+| `j` / `↑` | Select previous cell |
+| `k` / `↓` | Select next cell |
+| `a` | Insert cell above selected |
+| `b` | Insert cell below selected |
+| `Enter` | Enter edit mode for selected cell |
+| `Esc` | Return to command mode |
+
+---
+
+## Working with Terarium assets
+
+Beaker's kernel context is initialised with the IDs of the assets connected to the operator. This means you can reference models, datasets, and configurations by their Terarium IDs without any manual setup.
+
+### Accessing models and datasets
+
+```python
+# The kernel context is pre-loaded with asset references.
+# Use the HMI server client to fetch assets by ID.
+import requests
+
+model = requests.get(
+    f"{HMI_SERVER_URL}/api/models/{model_id}",
+    headers={"Authorization": f"Bearer {token}"}
+).json()
+```
+
+<Tip>
+The `HMI_SERVER_URL` environment variable is injected automatically into every Beaker session (configured as `http://hmi-server:3000` in the default deployment). You do not need to hard-code the address.
+</Tip>
+
+### Saving results back to Terarium
+
+Generated code can emit structured messages that the front-end intercepts:
+
+| Message type | Effect |
+|---|---|
+| `save_dataset_response` | Saves a CSV as a new Dataset asset in the project |
+| `save_amr_response` | Saves a model AMR as a new or updated Model asset |
+| `model_preview` | Renders a live model preview in the notebook cell |
+| `dataset` | Renders a CSV preview in the notebook cell |
+
+---
+
+## Available integrations
+
+Beaker's kernel environment includes several pre-configured integrations.
+
+<CardGroup cols={2}>
+  <Card title="MIRA" icon="atom">
+    The MIRA modelling library is available for model stratification, ODE generation, and ontology grounding. The `MIRA_REST_URL` environment variable points to the shared MIRA service.
+  </Card>
+  <Card title="PyCIEMSS simulation" icon="chart-line">
+    Simulation runs can be dispatched to the PyCIEMSS scheduler via `SIMULATION_SCHEDULER_URL`. Use this for running calibrations or forecasts programmatically with custom parameter sweeps.
+  </Card>
+  <Card title="HMI server API" icon="server">
+    Full REST access to the Terarium HMI server at `HMI_SERVER_URL`. Read and write models, datasets, configurations, and simulation results using the same API the UI uses.
+  </Card>
+  <Card title="OpenAI LLM" icon="sparkles">
+    The chat assistant is backed by the same `OPENAI_API_KEY` used by GoLLM. Beaker uses it for generating code, explaining results, and answering questions about loaded assets.
+  </Card>
+</CardGroup>
+
+---
+
+## Session management
+
+### Lifecycle
+
+A Jupyter session is created when you open a notebook-enabled drilldown. The `KernelSessionManager` (in `packages/client/hmi-client/src/services/jupyter.ts`) handles:
+
+- Fetching server settings from `GET /tgpt/configuration`
+- Creating a `SessionContext` with the requested kernel (typically `beaker_kernel`)
+- Sending a `context_setup_request` message with the operator's asset context once the kernel is ready
+
+The session shuts down automatically when the browser tab closes (`beforeunload` event) or when you navigate away from the drilldown.
+
+### Persistence
+
+Notebook history (prompts, generated code, and selected outputs) is saved after every change via the `NotebookSession` service. When you reopen the same operator, your previous cells are restored. Only the last executed code per cell is persisted by default.
+
+### Kernel status
+
+The input bar reflects the current kernel state:
+
+| State | Indicator |
+|---|---|
+| Idle | Input is enabled; send button is active |
+| Busy | Input is disabled; a spinner appears; "Please wait…" placeholder is shown |
+| Starting / Restarting | Progress bar is displayed |
+
+<Warning>
+If the kernel fails to connect within 10 seconds (100 polling attempts at 100 ms intervals), the session is rejected and an error is thrown. This can happen if the Beaker container is not running or the `JUPYTER_TOKEN` is misconfigured.
+</Warning>
+
+---
+
+## Deployment configuration
+
+The key environment variables for the Beaker service are set in `deploy/scripts/docker-compose-data-services.yml`:
+
+```yaml
+beaker:
+  image: ghcr.io/darpa-askem/askem-beaker:latest
+  environment:
+    HMI_SERVER_URL: "http://hmi-server:3000"
+    JUPYTER_SERVER: "http://beaker:8888"
+    MIRA_REST_URL: "http://mira:8771"
+    SIMULATION_SCHEDULER_URL: "http://pyciemss-api:8000"
+    JUPYTER_TOKEN: "<your-token>"
+    OPENAI_API_KEY: "<your-openai-key>"
+```
+
+| Variable | Purpose |
+|---|---|
+| `HMI_SERVER_URL` | Base URL the kernel uses to read/write Terarium assets |
+| `JUPYTER_SERVER` | Address the front-end connects to for WebSocket communication |
+| `MIRA_REST_URL` | MIRA REST endpoint for model operations |
+| `SIMULATION_SCHEDULER_URL` | PyCIEMSS API for dispatching simulations |
+| `JUPYTER_TOKEN` | Authentication token for the Jupyter server |
+| `OPENAI_API_KEY` | API key for the LLM-powered chat assistant |

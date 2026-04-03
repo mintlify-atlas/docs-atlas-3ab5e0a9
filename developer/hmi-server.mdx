@@ -1,0 +1,241 @@
+---
+title: "HMI server"
+description: "Internals of the Spring Boot API server that powers the Terarium backend."
+---
+
+The HMI server (`packages/server`) is a Spring Boot 3 application that serves as the single backend for the Terarium UI. It owns all business logic, data persistence, authentication, authorization, and async AI task dispatch.
+
+- **Port:** 3000
+- **Framework:** Spring Boot 3.1 / Java 17
+- **Build tool:** Gradle (with the Spring dependency-management plugin)
+- **ORM:** Hibernate 6 / Spring Data JPA
+- **Search:** Elasticsearch 8 Java client
+- **Message broker:** Spring AMQP / RabbitMQ
+- **Auth:** Spring Security OAuth2 resource server (Keycloak JWT)
+- **Authorization:** SpiceDB (Authzed) via gRPC
+- **Object storage:** AWS SDK v2 (pointed at MinIO for local)
+
+## Controller groups
+
+Controllers are organized by domain under `controller/`:
+
+<AccordionGroup>
+  <Accordion title="dataservice — core asset management">
+    Handles CRUD for all Terarium asset types. Each controller maps to a distinct REST prefix.
+
+    | Controller | Prefix | Asset type |
+    |------------|--------|------------|
+    | `ModelController` | `/models` | AMR model definitions |
+    | `ModelConfigurationController` | `/model-configurations` | Parameter configurations |
+    | `DatasetController` | `/datasets` | Tabular datasets |
+    | `DocumentController` | `/document-asset` | Uploaded PDF/text documents |
+    | `ArtifactController` | `/artifacts` | Raw file artifacts |
+    | `SimulationController` | `/simulations` | Simulation run records |
+    | `ProjectController` | `/projects` | Projects (containers for assets) |
+    | `WorkflowController` | `/workflows` | Workflow graph definitions |
+    | `InterventionController` | `/interventions` | Intervention specifications |
+    | `NotebookSessionController` | `/sessions` | Beaker notebook sessions |
+    | `AssetController` | `/assets` | Generic asset operations |
+    | `ChartAnnotationController` | `/chart-annotations` | AI-generated chart labels |
+    | `SummaryController` | `/summaries` | AI-generated summaries |
+  </Accordion>
+  <Accordion title="gollm — GoLLM AI tasks">
+    Routes under `/gollm` dispatch AI tasks to the GoLLM task runner via RabbitMQ. All endpoints accept an optional `mode` parameter (`ASYNC` or `SYNC`).
+
+    | Endpoint | Task |
+    |----------|------|
+    | `GET /gollm/configure-model` | Configure model parameters from a document |
+    | `POST /gollm/configure-from-dataset` | Configure model parameters from a dataset |
+    | `GET /gollm/enrich-model-metadata` | Enrich AMR metadata (name, description, concepts) |
+    | `GET /gollm/enrich-dataset` | Enrich dataset metadata |
+    | `GET /gollm/compare-models` | Textual comparison of multiple AMR models |
+    | `POST /gollm/equations-from-image` | Extract equations from a base64-encoded image |
+    | `POST /gollm/generate-summary` | Generate an LLM-based project summary |
+    | `POST /gollm/chart-annotation` | Generate natural-language annotations for charts |
+    | `GET /gollm/interventions-from-document` | Extract intervention specs from a document |
+    | `GET /gollm/interventions-from-dataset` | Extract intervention specs from a dataset |
+    | `POST /gollm/document-question` | Answer a question about a document |
+    | `PUT /gollm/{task-id}` | Cancel a GoLLM task |
+  </Accordion>
+  <Accordion title="mira — model transformation tasks">
+    Routes under `/mira` dispatch model transformation and conversion tasks to the MIRA task runner.
+
+    | Endpoint | Task |
+    |----------|------|
+    | `POST /mira/amr-to-mmt` | Convert an AMR to a MIRA Model Template |
+    | `POST /mira/simplify` | Simplify an AMR model |
+    | `POST /mira/model-to-latex` | Generate LaTeX equations from an AMR |
+    | `POST /mira/convert-and-create-model` | Convert SBML / Stella / MDL artifact to an AMR and persist it |
+    | `POST /mira/compare-models-concepts` | Compare the ontological concepts of multiple AMR models |
+    | `PUT /mira/{task-id}` | Cancel a MIRA task |
+  </Accordion>
+  <Accordion title="funman — model validation">
+    Routes under `/funman` dispatch parameter validation tasks to the FUNMAN task runner via RabbitMQ.
+  </Accordion>
+  <Accordion title="knowledge — document extraction">
+    Routes under `/knowledge` trigger document ingestion, text and equation extraction, and DKG concept grounding pipelines.
+  </Accordion>
+  <Accordion title="simulationservice — CIEMSS simulations">
+    Routes under `/simulations` (proxied to pyciemss-api) manage simulation job lifecycle: create, status poll, cancel, and result retrieval.
+  </Accordion>
+  <Accordion title="Other controllers">
+
+    | Controller | Purpose |
+    |------------|---------|
+    | `AuthController` | Keycloak token exchange helpers |
+    | `UserController` | User profile and preferences |
+    | `DKGController` | Domain Knowledge Graph concept search |
+    | `TGPTController` | Beaker notebook proxy |
+    | `EventController` | SSE stream endpoint for client push events |
+    | `ConfigController` | Serves client-side runtime configuration (Keycloak URL, feature flags) |
+    | `S3FileController` | Direct S3/MinIO file upload and download |
+    | `ImageController` | Image upload and retrieval |
+    | `DownloadController` | Encrypted download link generation |
+    | `CacheController` | Cache management (admin only) |
+    | `admin/` | Admin-only endpoints (user management, permissions) |
+    | `notification/` | Notification group and event APIs |
+    | `permissions/` | SpiceDB permission management |
+    | `evaluation/` | Evaluation-specific endpoints |
+  </Accordion>
+</AccordionGroup>
+
+## Data model
+
+### `TerariumAsset` base class
+
+All primary domain objects (models, datasets, documents, simulations, etc.) extend a common base entity that provides:
+
+- `id` — `UUID` (generated on construction)
+- `createdOn` / `updatedOn` — audit timestamps
+- `deletedOn` — soft-delete support
+- `name`, `description` — human-readable metadata
+- `fileNames` — list of associated S3 object keys
+- `publicAsset` — visibility flag
+- `metadata` — arbitrary JSON metadata (using `SupportAdditionalProperties` pattern)
+
+<Note>
+  Dynamic properties that are completely opaque (e.g. `JsonNode`, `Map<String, JsonNode>`) are stored as `json` columns in PostgreSQL. Structured domain entities with defined fields are stored as separate `@Entity` tables.
+</Note>
+
+### Key entity types
+
+| Entity | Table | Notes |
+|--------|-------|-------|
+| `Project` | `project` | Container for all user assets |
+| `Model` | `model` | AMR model definition (stored as JSON) |
+| `ModelConfiguration` | `model_configuration` | Named parameter sets for a model |
+| `Dataset` | `dataset` | Tabular data asset |
+| `DocumentAsset` | `document_asset` | Uploaded document with extracted text |
+| `Simulation` | `simulation` | Record of a simulation run and its results |
+| `Workflow` | `workflow` | Node-graph workflow definition |
+| `Intervention` | `intervention` | Intervention specification |
+| `NotificationGroup` | `notification_group` | Tracks an async task's lifecycle |
+| `NotificationEvent` | `notification_event` | Individual status update within a group |
+
+## Persistence and migrations
+
+Terarium uses a two-pass migration strategy:
+
+<Steps>
+  <Step title="Hibernate DDL (pass 1)">
+    At startup, `spring.jpa.hibernate.ddl-auto=update` causes Hibernate to add new tables and columns that are missing. It never deletes existing tables or columns.
+  </Step>
+  <Step title="Flyway migrations (pass 2)">
+    Flyway executes after the Hibernate pass. SQL migration files live in `packages/server/src/main/resources/db/migration/` and follow the naming convention `V{VERSION_NUM}__Description.sql`.
+
+    ```sql
+    -- V42__Add_workflow_thumbnail.sql
+    ALTER TABLE workflow ADD COLUMN thumbnail text;
+    ```
+
+    Java-based migrations (placed in `packages/server/src/main/java/db/migration/`) are used only when the change cannot be expressed as plain SQL.
+  </Step>
+</Steps>
+
+<Warning>
+  Always prefer `.sql` migrations over Java migrations. Use Flyway when you need to modify an existing column — Hibernate's DDL auto-update does not handle column modifications.
+</Warning>
+
+## Authentication and authorization
+
+### Authentication (Keycloak JWT)
+
+Every request (except health-check endpoints and a configurable set of `unauthenticated-url-patterns`) must carry a Bearer JWT issued by Keycloak.
+
+Spring Security is configured as an OAuth2 resource server:
+
+```yaml
+spring.security.oauth2.resourceserver.jwt.issuer-uri: http://keycloak:8081/realms/terarium
+```
+
+The JWT is validated against Keycloak's JWKS endpoint on every request.
+
+### Service-to-service requests
+
+Internal services (pyciemss-worker, task runners) authenticate to hmi-server using a dedicated Keycloak service account (`api-service`). The URL patterns for which service credentials are accepted are listed in `application.properties`:
+
+```properties
+terarium.serviceRequestPatterns[0]=/artifacts/**
+terarium.serviceRequestPatterns[1]=/concepts/**
+terarium.serviceRequestPatterns[2]=/datasets/**
+# ... etc.
+```
+
+Add a new pattern here when a new controller endpoint must be accessible to internal services.
+
+### Authorization (SpiceDB)
+
+Resource-level permissions are enforced via SpiceDB. Controllers annotated with `@HasProjectAccess` check the authenticated user's permission (read/write) on the target project before executing the request. Permission relationships are managed through the `permissions/` controller group.
+
+## Async task dispatch
+
+The `TaskService` (`service/tasks/TaskService.java`) is the central coordinator for all async AI tasks. See the [Task runner](/developer/task-runner) page for the full pattern description.
+
+### Registering a response handler
+
+Each controller that dispatches tasks registers its handlers in a `@PostConstruct` method:
+
+```java
+@PostConstruct
+void init() {
+    taskService.addResponseHandler(enrichModelResponseHandler);
+    taskService.addResponseHandler(configureModelFromDocumentResponseHandler);
+    // ...
+}
+```
+
+### Dispatching a task
+
+```java
+TaskRequest req = new TaskRequest();
+req.setType(TaskType.GOLLM);           // routes to the correct RabbitMQ connection
+req.setScript("gollm:enrich_model");   // selects the task runner script
+req.setUserId(currentUserService.get().getId());
+req.setProjectId(projectId);
+req.setInput(objectMapper.writeValueAsBytes(input));
+
+// ASYNC: returns immediately with a QUEUED status
+TaskResponse resp = taskService.runTask(TaskMode.ASYNC, req);
+
+// SYNC: blocks until the task completes or times out
+TaskResponse resp = taskService.runTask(TaskMode.SYNC, req);
+```
+
+### Task modes
+
+| Mode | Behaviour |
+|------|-----------|
+| `ASYNC` | Publishes to RabbitMQ and returns a `QUEUED` response immediately. Progress and final result are pushed to the client via SSE. |
+| `SYNC` | Publishes to RabbitMQ and blocks the HTTP thread until the result arrives or the `timeoutMinutes` deadline is exceeded. |
+
+## Type generation
+
+Server-side model classes annotated with `@TSModel` are compiled to TypeScript interfaces by the `typescript-generator` Gradle plugin and written to `packages/client/hmi-client/src/types/Types.ts`. This keeps the frontend types in sync with the Java model without manual duplication.
+
+```bash
+./gradlew generateTypeScript
+```
+
+## API documentation
+
+Swagger UI is available at `/swagger-ui` when `terarium.enable-swagger=true` (the default in local and staging environments). The OpenAPI spec is generated by SpringDoc.

@@ -1,0 +1,150 @@
+---
+title: "Model validation with FUNMAN"
+description: "Verify that a model configuration satisfies behavioral constraints before running simulations."
+---
+
+**FUNMAN** (Functional Model Analysis) is a formal analysis tool that partitions the parameter space of a model into regions that *satisfy* and regions that *do not satisfy* a set of user-defined constraints. Rather than simulating a single trajectory, FUNMAN explores the full space of possible parameter combinations and labels each region as either feasible or infeasible.
+
+Use FUNMAN to answer questions such as:
+
+- *Do any combinations of `beta` and `gamma` cause the infectious population to exceed 1,000 people at any point in a 100-day window?*
+- *Is there a parameter regime in which the total population remains conserved at every timestep?*
+
+The output is a validated model configuration that you can trust as a starting point for simulation or calibration.
+
+## Inputs and outputs
+
+| Port | Type | Required |
+|------|------|----------|
+| Model configuration | `modelConfigId` | Yes |
+| Dataset | `datasetId` | No |
+| **Output: Model configuration** | `modelConfigId` | — |
+
+## Defining constraints
+
+Open the **Validate configuration settings** sidebar. Constraints are listed under the **Model checks** accordion.
+
+### Compartmental constraint
+
+The compartmental constraint (enabled by default) checks that the sum of all state variables equals the total initial population at every timestep. This is the conservation-of-mass check for compartmental models such as SIR. Toggle the **Active** switch to disable it if your model intentionally loses or gains total population.
+
+### Custom constraint groups
+
+Click **Add constraint** to define an additional constraint. Each constraint group has the following fields:
+
+| Field | Description |
+|-------|-------------|
+| Name | A label for this constraint group (editable inline) |
+| Apply to | The variable type: `state variable(s)`, `parameter(s)`, or `observable(s)` |
+| Variables | The specific variable(s) the constraint applies to |
+| Constraint type | The relationship to enforce (see below) |
+| Timepoints interval | The time range `[lb, ub]` over which the constraint must hold |
+| Value interval | The acceptable value range `[lb, ub]` for the selected variable |
+| Active toggle | Enable or disable this constraint for the current run |
+
+**Supported constraint types:**
+
+| Type | Description |
+|------|-------------|
+| `less than` | Variable must be strictly below the upper bound at every checked timepoint |
+| `less than or equal to` | Variable must be at or below the upper bound |
+| `greater than` | Variable must be strictly above the lower bound |
+| `greater than or equal to` | Variable must be at or above the lower bound |
+| `increasing` | Variable must be non-decreasing over the timepoint interval |
+| `decreasing` | Variable must be non-increasing over the timepoint interval |
+| `linearly constrained` | A weighted linear combination of variables must satisfy the bound |
+| `following` | Variable must follow the trajectory implied by the dataset input |
+
+<Warning>
+  The `following` constraint type requires a dataset to be connected to the optional dataset input port. FUNMAN uses the dataset values as reference points when checking whether the model trajectory follows the observed data.
+</Warning>
+
+## Selecting parameters of interest
+
+Under **Settings**, use the **Select parameters of interest** multiselect to choose which model parameters FUNMAN should partition. Only selected parameters are varied during analysis; unselected parameters are held at their configured values.
+
+Each parameter appears with its name and its current interval bounds from the model configuration. FUNMAN uses these bounds as the search space for that parameter.
+
+<Note>
+  Limiting the number of parameters of interest significantly reduces analysis time. Start with two or three parameters and expand once you understand the constraint structure.
+</Note>
+
+## Configuring the time span
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| Start time | `0` | Beginning of the analysis window |
+| End time | `100` | End of the analysis window |
+| Number of timesteps | `10` | How many evenly spaced points to check within the window |
+| Tolerance | `0.2` | Box size tolerance: smaller values give finer resolution but longer runtimes |
+
+The computed timestep list is shown inline so you can verify the sampling before running.
+
+## Running FUNMAN
+
+<Steps>
+  <Step title="Configure constraints and settings">
+    Add or enable the constraints you want to verify, select the parameters of interest, and set the time span.
+  </Step>
+  <Step title="Click Run">
+    FUNMAN begins partitioning the parameter space. A progress indicator and coverage percentage update as the solver works. Click **Stop** to halt analysis early — partial results remain visible.
+  </Step>
+  <Step title="Inspect results">
+    When the run completes (or after you stop it), the preview panel shows the partitioned parameter space.
+  </Step>
+</Steps>
+
+## Interpreting results
+
+The preview panel is organized into four accordion sections.
+
+### State variables
+
+Trajectory bands for each selected state variable, drawn from the parameter boxes identified during analysis. Points within satisfied regions are colored differently from those in unsatisfied regions, letting you see which parts of the trajectory space are feasible.
+
+Use the **Output settings** panel to choose which state variables to display.
+
+### Parameters
+
+A scatter-plot or grid visualization of the partitioned parameter space. Each box (hyper-rectangle) in the parameter space is colored to indicate whether it is:
+
+- **Satisfied** — all trajectories from parameter combinations in this box satisfy every active constraint
+- **Unsatisfied** — at least one trajectory from this box violates a constraint
+- **Unknown** — analysis did not fully resolve this region (can occur when tolerance is coarse or analysis was stopped early)
+
+Click a box in the parameter chart to highlight the trajectories associated with that region.
+
+### Observables
+
+If your model defines observables, their computed values under the validated parameter boxes are shown here.
+
+### Diagram
+
+A structural diagram of the model for reference.
+
+## Output settings panel
+
+The **Output settings** sidebar (right side) controls which variables are plotted in each section:
+
+- **State variables** — select from the model's state variables
+- **Parameters** — select which parameter axes to display in the partition chart
+- **Observable** — select from the model's defined observables
+
+Two additional toggles are available at the bottom of the panel:
+
+| Toggle | Effect |
+|--------|--------|
+| Only show furthest results | Filters the visualization to the boxes that FUNMAN explored most deeply |
+| Focus on model checks | Highlights only the boxes that are relevant to the compartmental constraint |
+
+## Raw request and response
+
+The **Notebook** tab provides a JSON editor containing the raw FUNMAN request payload. You can edit this directly and click **Run** to send a custom request. Changes in the notebook do not synchronize back to the wizard view. Use **Sync with Wizard** (available when the request and wizard are in sync) to restore the wizard-generated payload.
+
+## Saving results
+
+Click **Save for reuse** to persist the validated model configuration as a named project asset. The saved configuration retains the parameter ranges and the association with the FUNMAN run, making it traceable back to the validation analysis.
+
+<Tip>
+  Run FUNMAN before calibration or simulation to confirm that your model's parameter space is well-defined and that no parameter combination produces physically impossible behavior (such as negative populations or total mass exceeding the initial value). This catches modeling errors early.
+</Tip>

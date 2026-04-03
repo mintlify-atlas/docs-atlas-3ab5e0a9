@@ -1,0 +1,153 @@
+---
+title: "Datasets"
+description: "Upload, transform, and compare tabular datasets for model calibration and validation in Terarium."
+---
+
+Datasets in Terarium are tabular data files — primarily CSVs — that feed into model calibration, simulation comparison, and analysis workflows. A dataset can hold observed real-world measurements, simulation outputs saved for later reuse, or any time-series data you want to work with on the workflow canvas.
+
+## Adding datasets to a project
+
+<Tabs>
+  <Tab title="Upload a file">
+    <Steps>
+      <Step title="Open the Resources panel">
+        Inside your project, open the **Resources** panel on the left sidebar.
+      </Step>
+      <Step title="Add a dataset">
+        Click **Add dataset**, then select **Upload file**.
+      </Step>
+      <Step title="Choose your CSV">
+        Select a `.csv` file from your local machine. Terarium creates a new dataset asset with the same name as the file and stores it in the project.
+      </Step>
+    </Steps>
+
+    <Note>
+      Terarium also accepts arbitrary file types (non-CSV) as dataset assets, but most workflow operators that read tabular data expect CSV format.
+    </Note>
+  </Tab>
+  <Tab title="Import from GitHub">
+    <Steps>
+      <Step title="Open the Resources panel">
+        Inside your project, open the **Resources** panel and click **Add dataset**.
+      </Step>
+      <Step title="Select GitHub import">
+        Choose **Import from GitHub**. Provide the repository owner and name along with the file path.
+      </Step>
+      <Step title="Confirm import">
+        Terarium fetches the file directly from the GitHub repository and registers it as a dataset in your project.
+      </Step>
+    </Steps>
+  </Tab>
+  <Tab title="Save simulation output">
+    After running a simulation, you can persist the results as a reusable dataset. On any **Simulate** or **Calibrate** node, click **Save as dataset**. The saved dataset appears in your project resources and can be connected to downstream operators like **Compare datasets**.
+  </Tab>
+</Tabs>
+
+## Dataset operator
+
+The **Dataset** operator places a dataset onto the workflow canvas so it can be used as an input to calibration, comparison, or transformation steps.
+
+<Steps>
+  <Step title="Add the operator">
+    On the workflow canvas, open the operator library and drag a **Dataset** node onto the canvas.
+  </Step>
+  <Step title="Select a dataset">
+    Open the node's drilldown panel and choose a dataset from your project resources.
+  </Step>
+  <Step title="Connect to downstream operators">
+    The Dataset node exposes a single `Dataset` output port. Connect it to any operator that accepts a dataset input, such as **Calibrate**, **Transform dataset**, or **Compare datasets**.
+  </Step>
+</Steps>
+
+The Dataset node's drilldown shows three sections:
+
+| Section | Description |
+|---|---|
+| **Description** | Editable rich-text description and data card metadata |
+| **Column information** | Per-column name, description, data type, unit, and concept grounding |
+| **Data** | Paginated preview of up to 100 rows of the raw CSV content |
+
+You can rename columns, add descriptions, and attach ontology concept identifiers directly in the **Column information** section. Click **Save** to persist your changes.
+
+## Transforming datasets
+
+The **Transform dataset** operator lets you reshape, filter, join, or augment a dataset using Python or R code in an integrated notebook environment.
+
+<Steps>
+  <Step title="Add the operator">
+    Drag a **Transform dataset** node onto the canvas and connect your Dataset (or simulation output) to its input port.
+  </Step>
+  <Step title="Write transformation code">
+    Open the drilldown panel. Your input dataset is pre-loaded as a dataframe (e.g., `d1`) in a Jupyter-backed notebook. Write Python or R code to reshape the data.
+
+    Example transformations:
+
+    ```python
+    # Rename a column
+    d1 = d1.rename(columns={"infected": "I_state"})
+
+    # Filter rows by time range
+    d1 = d1[d1["time"] >= 10]
+
+    # Add a derived column
+    d1["cumulative_infected"] = d1["I_state"].cumsum()
+    ```
+  </Step>
+  <Step title="Select and save the output">
+    Use the **Select a dataframe** dropdown to choose which dataframe to save. Click **Save for reuse** to register the transformed result as a new dataset in your project.
+  </Step>
+</Steps>
+
+<Tip>
+  The AI assistant in the Transform dataset panel understands your dataframe structure. You can describe the transformation in plain language — for example, "join d1 and d2 on the date column and name the result d3" — and the assistant writes the code for you.
+</Tip>
+
+The Transform dataset operator accepts both raw datasets and simulation outputs as inputs. The programming language (Python or R) can be changed from the panel header.
+
+## Comparing datasets
+
+The **Compare datasets** operator overlays multiple datasets or simulation outputs on a shared chart so you can evaluate differences across scenarios.
+
+<Steps>
+  <Step title="Connect multiple inputs">
+    Add a **Compare datasets** node and connect two or more Dataset or simulation output ports to its input ports.
+  </Step>
+  <Step title="Configure comparison options">
+    Open the drilldown panel and choose:
+
+    - **Plot type** — display absolute values, difference from baseline, or percentage change
+    - **Baseline dataset** — the reference dataset that differences are computed against
+    - **Ground truth** — an optional observed dataset to compare simulations against
+  </Step>
+  <Step title="Define criteria of interest">
+    Add criteria cards to evaluate specific variables at defined timepoints. Each criterion specifies:
+
+    - **Variable** — the column to evaluate
+    - **Timepoint** — first, last, peak, or average over all timepoints
+    - **Rank** — whether minimizing or maximizing the variable is desirable
+  </Step>
+</Steps>
+
+<Info>
+  When comparing simulation outputs, the Compare datasets operator reads both the full sample results (`result.csv`) and summary statistics (`result_summary.csv`) to render uncertainty intervals alongside mean trajectories.
+</Info>
+
+## Regridding (gridded datasets)
+
+The **Transform gridded dataset** operator resamples or interpolates climate or geospatial datasets stored as gridded arrays (for example, NetCDF-backed datasets or ESGF catalog entries).
+
+<Steps>
+  <Step title="Connect a gridded dataset">
+    Add a **Transform gridded dataset** node and connect a dataset with grid structure to its input port.
+  </Step>
+  <Step title="Describe the transformation">
+    The operator opens an AI-assisted notebook session powered by the Beaker climate data utility context. Describe your regridding operation in the chat interface — for example, specify target resolution, spatial extent, or time aggregation method.
+  </Step>
+  <Step title="Save the output">
+    When the transformed dataset is ready, click **New dataset saved** to add it to your project. The output appears as a new port on the node and can be connected to downstream operators.
+  </Step>
+</Steps>
+
+<Note>
+  Terarium skips raw CSV download for NetCDF-backed and ESGF datasets. Use the Transform gridded dataset operator to extract usable tabular data from these sources before connecting to calibration or comparison operators.
+</Note>

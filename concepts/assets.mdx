@@ -1,0 +1,91 @@
+---
+title: "Assets"
+description: "Assets are the data objects managed within a Terarium project — models, datasets, documents, code, workflows, simulations, configurations, intervention policies, and more."
+---
+
+Every piece of scientific content in Terarium is an asset. Assets are stored within a project and can be referenced by workflow operators, shared across the project team, and linked to provenance records that track how they were created or modified.
+
+## Asset types
+
+| Asset type | API key | Description |
+|---|---|---|
+| **Model** | `model` | A mathematical model expressed in AMR (ASKEM Model Representation) format, covering ODE, PetriNet, RegNet, and other formalisms |
+| **Dataset** | `dataset` | A tabular data file (CSV or similar) containing observational or simulation output data |
+| **Document** | `document` | A scientific paper or report (typically PDF) from which knowledge can be extracted using AI tools |
+| **Code** | `code` | A code asset such as a Python script or Jupyter notebook that can be executed in the integrated Beaker environment |
+| **Workflow** | `workflow` | A directed graph of operator nodes that defines a modeling pipeline on the visual canvas |
+| **Simulation** | `simulation` | The result of a simulation run, including output trajectories and metadata produced by the CIEMSS engine |
+| **Model configuration** | `model-configuration` | A snapshot of a model's initial conditions and parameter values, used as input to simulation and calibration operators |
+| **Intervention policy** | `intervention-policy` | A set of time-based interventions (parameter overrides) applied to a model during simulation or optimization |
+| **Artifact** | `artifact` | A generic binary or structured file that does not fit another asset category — used to store derived outputs or supplementary files |
+| **Notebook session** | `notebook-session` | A live or saved Beaker notebook session associated with a project |
+
+## How assets are added to a project
+
+There are three main ways to bring an asset into a project:
+
+<Tabs>
+  <Tab title="Upload">
+    Use the resource sidebar to upload files directly from your computer. Terarium accepts model files (AMR JSON, SBML, STELLA `.stmx`, Vensim `.mdl`), CSV datasets, and PDF documents.
+
+    <Steps>
+      <Step title="Open the resource sidebar">
+        In an open project, click the **Resources** panel on the left side.
+      </Step>
+      <Step title="Select the asset type section">
+        Find the section for the type of asset you want to add — for example, **Models** or **Datasets**.
+      </Step>
+      <Step title="Upload the file">
+        Click the upload icon and select the file from your computer. Terarium processes the file and adds it to the project.
+      </Step>
+    </Steps>
+  </Tab>
+  <Tab title="Import from knowledge sources">
+    Terarium can extract models and datasets from external sources such as scientific papers, GitHub repositories, or xDD (knowledge graph). Open a document asset and use the AI extraction tools to pull out equations, tables, or model structure, then save the result as a new model or dataset in the project.
+  </Tab>
+  <Tab title="Create within a workflow">
+    Many workflow operators produce new assets as outputs. For example:
+
+    - **Configure model** creates a new **model configuration**
+    - **Calibrate** produces a new **simulation** result and a refined **model configuration**
+    - **Create model from equations** generates a new **model**
+    - **Create intervention policy** creates a new **intervention policy**
+
+    These assets are automatically added to the project when the operator runs successfully.
+  </Tab>
+</Tabs>
+
+## Viewing and opening assets
+
+All project assets are listed in the **resource sidebar** grouped by type. Click any asset to open it in the main view. Each asset type has its own viewer and editor:
+
+- **Models** open in the model editor, where you can inspect equations, edit parameters, and view provenance.
+- **Datasets** open in the dataset viewer, where you can preview rows, inspect columns, and run transformations.
+- **Documents** open in the document viewer with AI-assisted extraction tools in the side panel.
+- **Workflows** open on the workflow canvas.
+
+## Removing an asset from a project
+
+To remove an asset, right-click it in the resource sidebar and select **Remove**. This unlinks the asset from the project. Shared assets may still be referenced by other projects.
+
+<Warning>
+  Removing an asset from a project does not delete the underlying data. If the asset is connected to a workflow operator, that operator will become invalid until a replacement is connected.
+</Warning>
+
+## Asset provenance
+
+Terarium tracks provenance for assets — recording how they were created, which operations transformed them, and which users made changes. Provenance is stored as typed relationships between assets (for example, `Simulation` derived from `ModelConfiguration` derived from `Model`).
+
+## Related pages
+
+<CardGroup cols={3}>
+  <Card title="Projects" icon="folder" href="/concepts/projects">
+    Assets are organized and shared within projects
+  </Card>
+  <Card title="Workflows" icon="diagram-project" href="/concepts/workflows">
+    Operators consume and produce assets on the canvas
+  </Card>
+  <Card title="Modeling" icon="share-2" href="/modeling/models">
+    Import, edit, and configure models
+  </Card>
+</CardGroup>

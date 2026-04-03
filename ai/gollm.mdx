@@ -1,0 +1,205 @@
+---
+title: "AI-assisted modeling (GoLLM)"
+description: "An overview of the LLM-powered AI tasks in Terarium that help you enrich models, extract configurations, detect interventions, and more."
+---
+
+GoLLM is the AI service embedded in Terarium. It connects the HMI server to a large language model backend (Azure OpenAI by default, with OpenAI and Llama also supported) and exposes a set of discrete **tasks** that assist modelers at every stage of the scientific workflow — from importing a model to annotating simulation results.
+
+Each task is a small, purpose-built Python program (under `packages/gollm/tasks/`) that receives structured input from the server, calls a prompt chain, and returns a structured JSON response. The server processes that response and writes the results directly back into the relevant Terarium asset.
+
+<Note>
+An OpenAI-compatible API key is required for most GoLLM tasks. Set `OPENAI_API_KEY` in your deployment environment (see `deploy/scripts/docker-compose-data-services.yml`). When no key is provided the service falls back to Azure OpenAI if those credentials are configured.
+</Note>
+
+---
+
+## Available AI tasks
+
+<CardGroup cols={2}>
+  <Card title="Enrich model" icon="sparkles">
+    Automatically populate a model's metadata — description, model card, and per-element descriptions and units — from a linked scientific paper.
+  </Card>
+  <Card title="Configure model from document" icon="file-lines">
+    Extract parameter values and initial conditions described in a research paper and generate one or more ready-to-use model configurations.
+  </Card>
+  <Card title="Configure model from dataset" icon="table">
+    Infer parameter values and initial conditions by analysing a time-series dataset alongside the model structure.
+  </Card>
+  <Card title="Interventions from document" icon="book-open">
+    Extract intervention policies (e.g. vaccination campaigns, lockdown periods) described in a paper and map them onto model parameters.
+  </Card>
+  <Card title="Interventions from dataset" icon="chart-line">
+    Detect change-points and potential interventions by inspecting patterns in a time-series dataset.
+  </Card>
+  <Card title="Compare models" icon="code-compare">
+    Generate a structured narrative comparison of two or more models' states, parameters, transitions, and overall purpose.
+  </Card>
+  <Card title="Equations from image" icon="image">
+    Extract LaTeX mathematical equations from a screenshot or figure and return them in a form that Terarium can use to reconstruct a model.
+  </Card>
+  <Card title="Enrich dataset" icon="database">
+    Add human-readable descriptions and semantic metadata to dataset columns, optionally grounding them against a reference document.
+  </Card>
+  <Card title="Chart annotation" icon="pen-ruler">
+    Generate Vega-Lite annotation layers for simulation charts based on a plain-language instruction (e.g. "add a vertical line at day 200").
+  </Card>
+  <Card title="Document question" icon="message-question">
+    Ask a free-form question about a document's content and receive a grounded, cited answer extracted from the paper's text.
+  </Card>
+</CardGroup>
+
+---
+
+## Task details
+
+### Enrich model
+
+**Where it appears:** Model editor — "Enrich with document" action.
+
+The enrichment task (`gollm:enrich_model`) sends the full AMR JSON and an optional scientific paper to the LLM. The model returns a **model card** plus per-element enrichments covering:
+
+- States — description and units
+- Parameters — description and units
+- Observables — description and units
+- Transitions — description
+
+Each enrichment is stored as a candidate in the model's metadata (`enrichments` list) with a reference back to the source extraction items in the document. Users can review and selectively apply individual enrichments rather than overwriting everything at once.
+
+```
+Input:  model AMR + document extractions
+Output: modelCard, states[], parameters[], observables[], transitions[]
+```
+
+### Configure model from document
+
+**Where it appears:** Model Configuration operator — "Auto-configure from paper" action.
+
+This task (`gollm:configure_model_from_document`) reads a research paper and creates one **ModelConfiguration** per experimental condition described in the paper (e.g. different countries, intervention scenarios, or disease severities). Each configuration contains:
+
+- A descriptive name and long-form description
+- Initial state values (`initialSemanticList`)
+- Parameter values — constant or uniform distributions (`parameterSemanticList`)
+
+All values are linked back to the source extraction item IDs so users can verify the provenance of every number.
+
+```
+Input:  model AMR + document extractions
+Output: conditions[] → each becomes a new ModelConfiguration asset
+```
+
+### Configure model from dataset
+
+**Where it appears:** Model Configuration operator — "Auto-configure from dataset" action.
+
+The dataset configuration task (`gollm:configure_model_from_dataset`) provides the LLM with the model AMR, dataset metadata, and a matrix of values. It returns candidate parameter and initial-condition assignments inferred from the time-series structure.
+
+```
+Input:  model AMR + dataset metadata + value matrix
+Output: parameter and initial-condition assignments
+```
+
+### Interventions from document
+
+**Where it appears:** Intervention Policy operator — "Extract from document" action.
+
+This task (`gollm:interventions_from_document`) reads policy descriptions in a paper and maps them onto the model's parameters, producing structured intervention objects ready to be applied in a simulation scenario.
+
+```
+Input:  model AMR + document extractions
+Output: intervention policy definitions
+```
+
+### Interventions from dataset
+
+**Where it appears:** Intervention Policy operator — "Extract from dataset" action.
+
+By inspecting abrupt changes in a time-series dataset, this task (`gollm:interventions_from_dataset`) infers likely intervention events and their approximate timing.
+
+```
+Input:  model AMR + dataset metadata
+Output: detected intervention events with timestamps
+```
+
+### Compare models
+
+**Where it appears:** Model Comparison operator drilldown.
+
+The comparison task (`gollm:compare_models`) accepts two or more model AMRs and an optional goal string (e.g. "focus on vaccination parameters"). It returns a prose comparison of each model's structure, states, parameters, and conceptual differences.
+
+```
+Input:  amrs[] + optional goal string
+Output: structured comparison narrative
+```
+
+### Equations from image
+
+**Where it appears:** Model From Equations operator — image upload flow.
+
+This task runs **synchronously** (`mode=SYNC`). A base-64-encoded image is sent to the LLM, which returns the mathematical equations it finds, in LaTeX. Terarium then uses those equations to reconstruct an AMR model.
+
+```
+Input:  base64-encoded image
+Output: LaTeX equations
+```
+
+### Enrich dataset
+
+**Where it appears:** Dataset asset viewer — "Enrich dataset" action.
+
+Given a dataset and an optional document, this task generates human-readable descriptions for each column and enriches the dataset card with semantic context.
+
+```
+Input:  dataset metadata + optional document
+Output: per-column descriptions and dataset-level metadata
+```
+
+### Chart annotation
+
+**Where it appears:** Simulation result charts — "Annotate chart" panel.
+
+This task generates a Vega-Lite layer object from a plain-language instruction such as "add a dashed line where infections peak". The layer is overlaid directly on the existing chart spec without modifying the underlying simulation data.
+
+Two chart types are supported:
+- `FORECAST_CHART` — standard time-series forecast lines
+- `QUANTILE_FORECAST_CHART` — quantile confidence-interval charts
+
+```
+Input:  chartType + preamble (existing chart context) + user instruction
+Output: Vega-Lite layer JSON object
+```
+
+### Document question
+
+**Where it appears:** Document viewer — question/answer panel.
+
+Given a document and a free-form question, the LLM returns a grounded answer drawn from the document's extracted text.
+
+```
+Input:  document extractions + question string
+Output: answer text with source references
+```
+
+---
+
+## Architecture overview
+
+All GoLLM tasks follow the same execution model:
+
+<Steps>
+  <Step title="Request arrives at HMI server">
+    A REST endpoint on the HMI server (e.g. `GET /gollm/enrich-model-metadata`) collects the required asset IDs and dispatches a task message to the GoLLM task-runner via a message queue.
+  </Step>
+  <Step title="GoLLM task runs">
+    The task runner launches the appropriate Python script (e.g. `tasks/enrich_model.py`), which calls the relevant prompt chain and streams the response back.
+  </Step>
+  <Step title="Response handler processes output">
+    A Java `ResponseHandler` class (e.g. `EnrichModelResponseHandler`) deserialises the JSON output and writes the results back to the affected assets via the appropriate service.
+  </Step>
+  <Step title="UI receives the result">
+    The front-end polls for task completion and displays the enriched data to the user, who can then review and apply the AI suggestions.
+  </Step>
+</Steps>
+
+<Tip>
+Tasks can be cancelled in-flight. The front-end calls `PUT /gollm/{taskId}` to request cancellation, which signals the task runner to stop the running process cleanly.
+</Tip>

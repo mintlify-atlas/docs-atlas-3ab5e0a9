@@ -1,0 +1,104 @@
+---
+title: "Architecture"
+description: "Overview of the Terarium system architecture and how its services interact."
+---
+
+Terarium is a full-stack knowledge, modeling, and simulation platform composed of a Vue 3 frontend, a Spring Boot API server, a set of Python AI/simulation microservices, and shared infrastructure components. All services communicate over a shared Docker network called `terarium`.
+
+## High-level overview
+
+```
+Browser
+  └─▶ hmi-client  (Vue 3, port 8080)
+        └─▶ hmi-server  (Spring Boot, port 3000)
+              ├─▶ postgres      (primary database)
+              ├─▶ elasticsearch (asset search & indexing)
+              ├─▶ redis         (caching & task-response cache)
+              ├─▶ minio         (S3-compatible object storage)
+              ├─▶ keycloak      (authentication / SSO)
+              ├─▶ spicedb       (fine-grained authorization)
+              ├─▶ rabbitmq      (async task queue)
+              │     ├─▶ gollm-taskrunner  ──▶ GoLLM AI service
+              │     ├─▶ mira-taskrunner   ──▶ MIRA REST API
+              │     ├─▶ funman-taskrunner ──▶ FUNMAN validation
+              │     └─▶ ocr-extraction-taskrunner
+              └─▶ pyciemss-api  (CIEMSS simulation, port 8000)
+                    └─▶ pyciemss-worker
+```
+
+## Services
+
+<CardGroup cols={2}>
+  <Card title="hmi-client" icon="browser">
+    Vue 3 + TypeScript single-page application. Built with Vite and served by an Nginx container on **port 8080**. Communicates with hmi-server over REST and receives real-time task updates via Server-Sent Events (SSE).
+  </Card>
+  <Card title="hmi-server" icon="server">
+    Spring Boot 3 REST API server running on **port 3000**. Owns all business logic, data persistence, authentication enforcement, and async task dispatch. It is the sole backend that hmi-client talks to directly.
+  </Card>
+  <Card title="gollm-taskrunner" icon="sparkles">
+    GoLLM AI task runner. Listens on RabbitMQ for AI tasks such as enriching model metadata, configuring models from documents or datasets, comparing models, and extracting equations from images. Requires an OpenAI API key.
+  </Card>
+  <Card title="mira-taskrunner" icon="arrows-rotate">
+    MIRA model transformation task runner. Bridges the hmi-server's RabbitMQ task requests to the MIRA REST service (port 8771). Handles AMR↔MMT conversion, SBML→Petri net, Stella/MDL→Stockflow, model stratification, and concept comparison.
+  </Card>
+  <Card title="funman-taskrunner" icon="circle-check">
+    FUNMAN model validation task runner. Validates model parameter configurations against constraints by executing FUNMAN analysis jobs dispatched via RabbitMQ.
+  </Card>
+  <Card title="ocr-extraction-taskrunner" icon="file-lines">
+    OCR and document extraction task runner. Processes uploaded documents to extract text, equations, and tables, making them available for downstream AI tasks.
+  </Card>
+  <Card title="pyciemss-api" icon="chart-line">
+    CIEMSS simulation REST API (port 8000). Accepts simulation, calibration, optimization, and ensemble requests from hmi-server. Delegates compute-heavy work to `pyciemss-worker`.
+  </Card>
+  <Card title="pyciemss-worker" icon="microchip">
+    Background worker for the CIEMSS simulation engine. Picks up jobs from Redis and RabbitMQ queues and writes results back to hmi-server via its REST API.
+  </Card>
+  <Card title="beaker" icon="flask">
+    Jupyter-based notebook server (port 8888). Provides an interactive coding environment accessible through the Terarium UI at the `/beaker/` path. Connected to hmi-server via HTTP and WebSocket.
+  </Card>
+  <Card title="postgres" icon="database">
+    PostgreSQL 14 primary relational database. Stores all Terarium entities (projects, models, datasets, simulations, workflows, etc.) as well as Keycloak realm data and SpiceDB authorization state.
+  </Card>
+  <Card title="elasticsearch" icon="magnifying-glass">
+    Elasticsearch 8 cluster (single-node). Used for full-text search and asset indexing across models, documents, datasets, simulations, workflows, and DKG concept entries.
+  </Card>
+  <Card title="rabbitmq" icon="arrow-right-arrow-left">
+    RabbitMQ 3 message broker. The central bus for all async AI/computation task dispatch. hmi-server publishes task requests; task runners consume them and publish results back.
+  </Card>
+  <Card title="redis" icon="bolt">
+    Redis 7 in-memory store. Used as a distributed caching layer for Spring Boot application caches and as the task-response cache in the `TaskService` (12-hour TTL, 2-hour max idle).
+  </Card>
+  <Card title="minio" icon="box">
+    MinIO S3-compatible object storage. Holds uploaded files for datasets, documents, artifacts, code assets, and simulation results. Two buckets are provisioned: `askem-local-storage` (user data) and `askem-static-storage` (static assets such as the epidemiology DKG index).
+  </Card>
+  <Card title="keycloak" icon="key">
+    Keycloak 26 identity provider running on **port 8081**. Manages the `terarium` realm, issues JWTs for all users, and provides the OIDC discovery document consumed by hmi-server's Spring Security OAuth2 resource server.
+  </Card>
+  <Card title="spicedb" icon="lock">
+    SpiceDB (Authzed) fine-grained authorization service (gRPC port 50051). Enforces project-level read/write permissions via a relationship-based access control (ReBAC) model.
+  </Card>
+</CardGroup>
+
+## Async task pattern
+
+Long-running AI and computation tasks follow an asynchronous request/response pattern over RabbitMQ so that hmi-server threads are never blocked.
+
+| Step | Actor | Action |
+|------|-------|--------|
+| 1 | hmi-server | Receives HTTP request from hmi-client, builds a `TaskRequest` with a unique UUID, and publishes it to the appropriate RabbitMQ request queue (e.g. `terarium-request-queue-gollm`). |
+| 2 | hmi-server | Immediately returns a `TaskResponse` with status `QUEUED` to the client. |
+| 3 | task runner | Consumes the request, spawns a child process for the script, pipes input through a named pipe, and collects `--output-pipe` / `--progress-pipe` output. |
+| 4 | task runner | Publishes intermediate progress and final results back to a RabbitMQ response exchange. |
+| 5 | hmi-server | One hmi-server instance consumes the response, runs the registered `TaskResponseHandler`, updates the notification group, and then broadcasts the response to all hmi-server instances via a fanout exchange. |
+| 6 | hmi-server | Each instance checks whether it holds the SSE connection for the target user. If it does, it pushes a `ClientEvent` to the browser. |
+| 7 | hmi-client | Receives the SSE event and updates the UI (workflow node, notification panel, etc.). |
+
+<Note>
+  Successful task responses are cached in Redis by a SHA-256 hash of the request payload (12-hour TTL). Subsequent identical requests are served from cache without re-running the task runner.
+</Note>
+
+## Deployment routing
+
+Each deployment (local, staging, prod) is assigned a `deploymentRoutingKey`. Task runners are started with a matching `TERARIUM_TASKRUNNER_REQUEST_TYPE`. This lets multiple isolated environments share the same RabbitMQ broker without cross-contamination of task traffic.
+
+In local development the routing key is `local`; in production it is `prod`.

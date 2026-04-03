@@ -1,0 +1,252 @@
+---
+title: "Local development"
+description: "Set up a Terarium development environment from scratch."
+---
+
+## Prerequisites
+
+| Tool | Minimum version | Purpose |
+|------|-----------------|---------|
+| Docker + Docker Compose | 20+ (BuildX enabled) | Run all backing services |
+| Node.js | 18+ | hmi-client build tooling |
+| Yarn | 4.4.0 (Berry) | hmi-client package manager |
+| Java (JDK) | 17+ | hmi-server compilation |
+| Gradle | bundled wrapper | hmi-server build |
+
+<Tip>
+  For the fastest inner loop, run the backing infrastructure (postgres, redis, rabbitmq, minio, keycloak, spicedb, elasticsearch) via Docker Compose and start hmi-server and hmi-client natively on your machine.
+</Tip>
+
+## 1. Clone and configure
+
+<Steps>
+  <Step title="Clone the repository">
+    ```bash
+    git clone https://github.com/DARPA-ASKEM/terarium.git
+    cd terarium/deploy
+    ```
+  </Step>
+  <Step title="Create the environment file">
+    ```bash
+    cp .env_template .env
+    ```
+    Open `.env` and set your `OPENAI_API_KEY` (required by the GoLLM task runner).
+  </Step>
+  <Step title="Add host aliases">
+    Terarium's internal services reference each other by hostname. Add the following to `/etc/hosts` (Linux/macOS) or `C:\Windows\System32\drivers\etc\hosts` (Windows):
+
+    ```
+    127.0.0.1  keycloak
+    127.0.0.1  minio
+    ```
+  </Step>
+</Steps>
+
+## 2. Start the full Docker Compose stack
+
+```bash
+# from the deploy/ directory
+docker compose up -d
+```
+
+This brings up all services. Access the application at [http://localhost:8080](http://localhost:8080).
+
+### Default login credentials
+
+| Username | Password | Role  |
+|----------|----------|-------|
+| adam     | admin123 | Admin |
+| ursula   | user123  | User  |
+
+## 3. hmi-client (Vue 3 frontend)
+
+The frontend lives in `packages/client/hmi-client` and is managed as a Yarn workspace.
+
+### Install dependencies
+
+From the repository root (Yarn 4 workspaces manages all packages together):
+
+```bash
+yarn install
+```
+
+### Development server modes
+
+The client ships with three Vite configuration profiles:
+
+<Tabs>
+  <Tab title="dev (default)">
+    Proxies all API calls to `http://localhost:3000`. Use this when running hmi-server locally.
+
+    ```bash
+    yarn dev
+    ```
+  </Tab>
+  <Tab title="local">
+    Variant of the `dev` profile with an alternative Vite config (`vite.config.local.ts`).
+
+    ```bash
+    yarn local
+    ```
+  </Tab>
+  <Tab title="staging">
+    Points API proxies at a remote staging hmi-server. Useful for frontend-only work.
+
+    ```bash
+    yarn staging
+    ```
+  </Tab>
+</Tabs>
+
+The dev server starts on `http://localhost:5173` by default and hot-reloads on file save.
+
+### TypeScript type generation
+
+Java model classes annotated with `@TSModel` are automatically converted to TypeScript interfaces by the `typescript-generator` Gradle plugin and written to:
+
+```
+packages/client/hmi-client/src/types/Types.ts
+```
+
+Re-generate after changing server models:
+
+```bash
+cd packages/server
+./gradlew generateTypeScript
+```
+
+## 4. hmi-server (Spring Boot backend)
+
+The server lives in `packages/server`.
+
+### Build
+
+```bash
+cd packages/server
+./gradlew build
+```
+
+### Run
+
+```bash
+./gradlew bootRun
+```
+
+The server starts on **port 3000** and connects to services at their default Docker Compose hostnames (postgres, redis, rabbitmq, etc.). When running natively, ensure the Docker Compose infrastructure is up first.
+
+<Note>
+  Set the Spring profile to `local` (`-Dspring.profiles.active=local`) when running outside Docker. This clears the Redis task-response cache on startup and configures local-specific queue names to avoid conflicts with other environments sharing the same RabbitMQ.
+</Note>
+
+### Build a Docker image
+
+```bash
+# from the repository root
+docker buildx build \
+  -f packages/server/docker/Dockerfile \
+  -t ghcr.io/darpa-askem/hmi-server:latest .
+```
+
+## 5. Task runners (optional)
+
+Task runners are fully containerised. The `docker-compose-taskrunner.yml` file uses builder images with volume mounts so that Python source changes are picked up automatically.
+
+```bash
+docker compose -f deploy/scripts/docker-compose-taskrunner.yml up -d
+```
+
+<Warning>
+  Task runners take about a minute to install Python dependencies and start the Java taskrunner process after the container starts.
+</Warning>
+
+To rebuild a specific task runner image:
+
+```bash
+# from the repository root
+docker build \
+  --tag=ghcr.io/darpa-askem/gollm-taskrunner:latest \
+  --no-cache \
+  --file=./packages/gollm/Dockerfile .
+```
+
+## 6. Code organisation
+
+### hmi-client source layout
+
+```
+packages/client/hmi-client/src/
+├── page/          # Route-level page components (one folder per Terarium page)
+├── components/    # Shared/base Vue components
+├── services/      # API call layers and domain-specific business logic *
+├── stores/        # Pinia state stores
+├── types/         # TypeScript interfaces (Types.ts is auto-generated)
+└── utils/         # Generic reusable utility functions *
+```
+
+<Note>
+  `services/` and `utils/` are marked with an asterisk — every exported function in these directories must have its own unit test.
+</Note>
+
+### Naming conventions
+
+| Context | Convention | Example |
+|---------|------------|---------|
+| Files and folders | `kebab-case` | `model-service.ts` |
+| Vue component names | `tera-` prefix | `<tera-slider>` |
+| TypeScript interfaces | `PascalCase`, suffix `Type` | `ModelType`, `DocumentNameType` |
+| Vue events | context + action | `query-updated`, `document-added-to-project` |
+| Vue SFC order | `<template>` → `<script lang="ts">` → `<style scoped>` | — |
+
+### Component conventions
+
+- Use HTML5 semantic elements (`<main>`, `<header>`, `<section>`, `<aside>`, `<footer>`) instead of unsemantic `<div>` soup.
+- Asset components (e.g. `tera-model.vue`) accept a `feature-config` prop for read-only/preview modes:
+
+  ```html
+  <tera-model
+    :asset-id="previewItemId"
+    :feature-config="{ isPreview: true }"
+  />
+  ```
+
+### Logging
+
+A singleton `logger` instance (`logger.ts`) buffers log messages and ships them to the `/logs` hmi-server endpoint. In development, logs are also written to the browser console.
+
+```typescript
+import { logger } from '@/utils/logger';
+
+logger.info('Model loaded', { modelId });
+logger.error('Fetch failed', error, { showToast: true });
+```
+
+## 7. Testing
+
+### Unit tests (Vitest)
+
+```bash
+cd packages/client/hmi-client
+yarn test          # watch mode
+yarn test:ci       # single run
+yarn test:coverage # coverage report
+```
+
+### End-to-end tests (Playwright)
+
+```bash
+yarn test:e2e                   # run all e2e tests
+yarn test:e2e:snapshots         # update visual snapshots
+```
+
+### Component tests (Playwright CT)
+
+```bash
+yarn test:ct
+```
+
+### Server tests (JUnit 5)
+
+```bash
+cd packages/server
+./gradlew test
+```

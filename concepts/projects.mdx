@@ -1,0 +1,89 @@
+---
+title: "Projects"
+description: "Projects are the top-level containers in Terarium. Everything you work on — models, datasets, documents, workflows, and other assets — lives inside a project."
+---
+
+A project gives you a shared space to organize the full lifecycle of a modeling study: from importing source material and building models, to running simulations and sharing results with collaborators.
+
+## What a project contains
+
+Every project holds a collection of **assets** — the data objects you work with in Terarium. Assets include models, datasets, documents, code files, workflows, simulations, model configurations, intervention policies, and artifacts. See [Assets](/concepts/assets) for the full list.
+
+Each project also has:
+
+- An **overview page** — a rich-text canvas where you can document your project's goals, methods, and findings.
+- A **resource sidebar** — a panel listing all assets in the project, grouped by type, so you can open any asset from a single place.
+- **Workflows** — visual pipelines that chain modeling operations together on a canvas.
+
+## The project overview page
+
+When you open a project, you land on its overview page. This is a freeform document you can use to describe the project, record decisions, and summarize results. The overview is stored with the project and visible to all collaborators.
+
+## The resource sidebar
+
+The resource sidebar appears on the left side of every project page. It lists all assets grouped by type — models, datasets, documents, workflows, and so on. Click any item in the sidebar to open it in the main view.
+
+<Tip>
+  Use the sidebar to navigate between assets without leaving the project. You can also create new workflows directly from the sidebar.
+</Tip>
+
+## Creating a project
+
+<Steps>
+  <Step title="Open the home page">
+    Go to the Terarium home page. You will see three tabs: **My projects**, **Public projects**, and **Sample projects**.
+  </Step>
+  <Step title="Create a new project">
+    Click **New project**. Enter a name and optional description, then confirm.
+  </Step>
+  <Step title="Add assets">
+    Once inside the project, use the resource sidebar to add assets — upload files, import from knowledge sources, or create assets directly within a workflow operator.
+  </Step>
+</Steps>
+
+## Importing and exporting projects
+
+You can transfer a complete project — including all its assets and workflows — between Terarium instances.
+
+- **Import**: Click **Upload project** on the home page and select a `.zip` export file.
+- **Export**: Open the project menu and choose **Export**. Terarium downloads the project as a `.zip` file.
+
+You can also **clone** an existing project to create an independent copy.
+
+## Managing projects
+
+From the home page, you can view projects as cards or as a table. The table view lets you see author, creation date, and last-updated date. Use the search bar to filter projects by name, description, or author.
+
+To edit a project's name or description, open the project menu from the home page card.
+
+## Permissions and roles
+
+Every project has a set of user permissions that control who can view and edit it.
+
+| Role | Access |
+|---|---|
+| **Creator** | Full control — edit, share, delete, and change permissions |
+| **Writer** | Can edit all project assets and workflows |
+| **Reader** | Can view the project but cannot make changes |
+
+By default, a project is private. You can make it **public** so that anyone with a Terarium account can view it, or mark it as a **sample project** visible to all users on the home page.
+
+To manage collaborators, open the project settings and add users by name or email, then assign them a role.
+
+<Warning>
+  Deleting a project is a soft-delete — the project is removed from your view but not immediately purged. Contact your administrator if you need to recover a deleted project.
+</Warning>
+
+## Related pages
+
+<CardGroup cols={3}>
+  <Card title="Workflows" icon="diagram-project" href="/concepts/workflows">
+    Build modeling pipelines on the visual canvas
+  </Card>
+  <Card title="Assets" icon="box" href="/concepts/assets">
+    Understand the types of data objects in a project
+  </Card>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Create your first project and run a simulation
+  </Card>
+</CardGroup>

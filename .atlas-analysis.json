@@ -1,22 +1,11 @@
 {
-  "$schema": "https://mintlify.com/docs.json",
-  "name": "Terarium",
+  "projectType": "saas",
+  "projectName": "Terarium",
+  "projectDescription": "A knowledge, modeling, and simulation ecosystem for researchers to create, configure, and simulate complex scientific models with AI assistance.",
   "theme": "willow",
-  "colors": {
-    "primary": "#1c8374"
-  },
-  "favicon": "https://media.brand.dev/c00ed1b8-a690-4a8b-9a7d-ea20cb6dffd0.png",
-  "navbar": {
-    "primary": {
-      "type": "github",
-      "href": "https://github.com/DARPA-ASKEM/terarium"
-    }
-  },
-  "footer": {
-    "socials": {
-      "github": "https://github.com/DARPA-ASKEM/terarium"
-    }
-  },
+  "primaryColor": "#1c8374",
+  "lightColor": null,
+  "darkColor": null,
   "navigation": {
     "tabs": [
       {
@@ -95,5 +84,28 @@
         ]
       }
     ]
-  }
+  },
+  "keyFeatures": [
+    "Visual workflow canvas for composing multi-step modeling pipelines",
+    "AI-assisted model creation from equations, documents, and images",
+    "Scientific simulation via CIEMSS (calibrate, simulate, optimize, ensemble)",
+    "MIRA-based model stratification and transformation",
+    "Knowledge extraction from PDFs, papers, and scientific literature",
+    "Interactive Beaker notebook environment for code-based analysis",
+    "Project-based asset management for models, datasets, and documents",
+    "Role-based access control via Keycloak",
+    "FUNMAN for model validation and feasibility analysis"
+  ],
+  "publicApiSurface": [
+    "GET/POST/PUT/DELETE /models",
+    "GET/POST/PUT/DELETE /projects",
+    "GET/POST/PUT/DELETE /datasets",
+    "GET/POST/PUT/DELETE /workflows",
+    "POST /simulations (simulate, calibrate, optimize, ensemble)",
+    "POST /gollm/* (AI model enrichment, configuration, equation extraction)",
+    "POST /mira/* (model stratification, SBML/STELLA/MDL conversion)",
+    "GET/POST /documents",
+    "POST /funman (model validation)",
+    "GET /knowledge (DKG knowledge graph queries)"
+  ]
 }

@@ -1,0 +1,125 @@
+---
+title: "Model configuration"
+description: "Learn how to create and manage model configurations that set initial conditions and parameter values for simulation."
+---
+
+A **model configuration** binds a model's structure to a specific set of numeric values — initial conditions for each state variable, distributions or constants for each parameter, and expressions for observables. A configuration is required before running any simulation: it tells the simulator where to start and which parameter values to use.
+
+A single model can have **many configurations**, each representing a different scenario, calibration result, or set of assumptions. All configurations derived from a model remain linked to it and can be selected or swapped at any point in the workflow.
+
+---
+
+## Configure model operator
+
+The **Configure model** operator is the primary tool for creating and editing configurations on the workflow canvas.
+
+**Inputs:**
+- `Model` (required) — the upstream model to configure
+- `Document` (optional) — a research paper or report for AI-assisted value extraction
+- `Dataset` (optional) — tabular data for AI-assisted value extraction
+
+**Outputs:** `Model configuration` — passed downstream to simulation, calibration, or further editing operators.
+
+---
+
+## Configurable fields
+
+<CardGroup cols={2}>
+  <Card title="Initial conditions" icon="play">
+    Each state variable has an **initial expression** — the starting value at time zero. Expressions support arithmetic and can reference other parameters. Values are stored as both a string and a MathML expression.
+  </Card>
+  <Card title="Parameters" icon="sliders">
+    Each parameter is assigned a **distribution**. The two supported distribution types are:
+    - **Constant** — a single fixed value
+    - **Uniform** — a range defined by minimum and maximum bounds
+  </Card>
+  <Card title="Observables" icon="chart-line">
+    Observable expressions inherited from the model can be overridden or annotated in a configuration. Observable semantics appear in the `observableSemanticList`.
+  </Card>
+  <Card title="Temporal context" icon="calendar">
+    An optional date assigned to timestep 0. When set, simulation charts display calendar dates rather than raw time indices. Supported granularities: day, week, month, year.
+  </Card>
+</CardGroup>
+
+### Parameter distributions
+
+| Distribution type | Parameters | Use case |
+|---|---|---|
+| Constant | `value` | Deterministic simulation with a known value |
+| Uniform | `minimum`, `maximum` | Ensemble or uncertainty quantification runs |
+| Inferred | `mean`, `stddev` | Read-only; populated by a calibration run |
+
+<Note>
+After a calibration simulation is linked to a configuration (`simulationId` is set), parameter values are displayed from the `inferredParameterList` rather than the `parameterSemanticList`. Inferred parameters are read-only and represent posterior estimates.
+</Note>
+
+---
+
+## Creating a configuration
+
+<Steps>
+  <Step title="Connect a model">
+    Add a **Model** operator to the canvas and select your model. Connect its output to a **Configure model** operator.
+  </Step>
+  <Step title="Open the operator panel">
+    Click the **Configure model** node to open the drilldown panel. The **Configurations** sidebar lists all configurations that already exist for this model.
+  </Step>
+  <Step title="Fill in values">
+    In the **Wizard** tab, enter numeric expressions for each initial condition and choose a distribution type and value for each parameter. Fields left empty are highlighted as missing.
+  </Step>
+  <Step title="Name and save">
+    Give the configuration a descriptive name using the editable title field at the top of the panel, then click **Save**. To keep the current configuration unchanged and create a new variant, click **Save as** instead.
+  </Step>
+</Steps>
+
+---
+
+## Working with multiple configurations
+
+The sidebar of the Configure model operator lists all configurations associated with the model. Click any configuration to switch to it. Switching will prompt a confirmation dialog if there are unsaved edits in the current configuration.
+
+You can **filter** the configuration list by name or description using the search box at the top of the sidebar.
+
+<Tip>
+Each saved configuration becomes an independent output port on the operator node, allowing you to branch the workflow and run simulations with different parameter sets in parallel.
+</Tip>
+
+---
+
+## AI-assisted configuration
+
+When a **Document** or **Dataset** is connected to the Configure model operator, you can use AI assistance to automatically populate parameter and initial condition values.
+
+<Tabs>
+  <Tab title="From a document">
+    Click **Extract from inputs** in the sidebar. Terarium sends the document and the model context to the AI service (`configureModelFromDocument`). The AI reads the paper, identifies relevant parameter values, and proposes enrichments — highlighted suggestions that you can accept or reject individually.
+
+    Accepted enrichments update the corresponding fields in the active configuration and record the source document name for traceability.
+  </Tab>
+  <Tab title="From a dataset">
+    Connect a dataset input. When you click **Extract from inputs**, Terarium builds a context matrix from the model's parameters and initials (`generateModelDatasetConfigurationContext`) and sends it along with the dataset to the AI service (`configureModelFromDataset`). The AI maps dataset columns to model parameters and suggests values.
+  </Tab>
+  <Tab title="Notebook (code)">
+    Switch to the **Notebook** tab to write Python code that directly reads and modifies the `model_config` variable exposed by the Beaker kernel. Use the LLM assistant to generate code from natural language — for example:
+
+    ```
+    Update parameter gamma to constant 0.13
+    Update parameter beta to a uniform distribution with max 0.5 and min 0.2
+    ```
+
+    Click **Run** to execute the code; the configuration preview updates automatically.
+  </Tab>
+</Tabs>
+
+<Warning>
+AI extractions from documents are only run once per document. If you connect the same document again after a prior extraction, Terarium will skip re-extraction and reuse the existing enrichments.
+</Warning>
+
+---
+
+## Downloading a configuration
+
+From the configuration item in the sidebar you can:
+
+- **Download archive** — exports a `.modelconfig` archive containing both the model JSON and the configuration, suitable for re-importing into another project.
+- **Download model** — exports the model with the configuration's values baked in as default values, as a standalone AMR JSON file.

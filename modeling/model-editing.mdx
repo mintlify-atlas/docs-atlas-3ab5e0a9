@@ -1,0 +1,141 @@
+---
+title: "Model editing"
+description: "Use the Edit model operator to modify a model's states, transitions, parameters, and observables through code or AI assistance."
+---
+
+The **Edit model** operator lets you modify the structure of an existing model directly on the workflow canvas. Unlike the Configure model operator — which only changes numeric values — the Edit model operator can change the model's topology: adding or removing state variables, creating new transitions, rewriting rate laws, renaming identifiers, and more.
+
+Edits are made through a Python code environment backed by the MIRA library and a Beaker kernel. An integrated LLM assistant can generate the required MIRA Python code from plain-language descriptions.
+
+---
+
+## Edit model operator
+
+**Inputs:** `Model` or `Model configuration` — if a model configuration is provided, Terarium creates a temporary model with the configuration's values baked in before opening the edit environment.
+
+**Outputs:** `Model` — each successful code execution that produces a changed model is saved as a new output, preserving the original.
+
+<Note>
+The Edit model operator is not runnable on its own; it produces output only when you execute code in the notebook environment. The first output is always initialized to the unmodified input model.
+</Note>
+
+---
+
+## Making edits
+
+<Steps>
+  <Step title="Connect a model">
+    Add an **Edit model** operator to the canvas and connect a **Model** (or **Model configuration**) input to it.
+  </Step>
+  <Step title="Open the operator panel">
+    Click the node to open the drilldown. The left pane contains a Python code editor. The right pane shows a live preview of the current model.
+  </Step>
+  <Step title="Write or generate code">
+    Type Python code in the editor, or use the LLM assistant to generate it. The code environment exposes a variable called `model` that is a MIRA `TemplateModel` object representing the loaded AMR.
+  </Step>
+  <Step title="Run the code">
+    Click **Run**. The kernel executes the code, resets the MIRA model context, and emits a `model_preview` response. The preview pane on the right updates to show the modified model.
+  </Step>
+  <Step title="Save the output">
+    If the modified model looks correct, it is automatically saved and appears as a new output port on the operator node. You can create multiple outputs by running different edits.
+  </Step>
+</Steps>
+
+---
+
+## What you can edit
+
+The MIRA library exposes a rich Python API for model editing. The following are common operations — the LLM assistant can generate code for all of them from natural language.
+
+<Tabs>
+  <Tab title="States">
+    Add, remove, or rename state variables (compartments). Examples:
+
+    ```
+    Rename the state "S" to "Susceptible" in the transition named "InfectionProcess"
+    ```
+
+    ```python
+    # Generated MIRA code example
+    model.rename_concept("S", "Susceptible")
+    ```
+  </Tab>
+  <Tab title="Parameters">
+    Add new parameters, rename existing ones, remove unused parameters, or change parameter values.
+
+    ```
+    Add a new parameter named "b" with value 0.5
+    Remove all unused parameters
+    Rename the parameter "k" to "m"
+    ```
+  </Tab>
+  <Tab title="Transitions">
+    Add natural transitions (from nowhere), degradation transitions (to nowhere), or full state-to-state transitions. Specify the rate law and which states it depends on.
+
+    ```
+    Add a new natural transition from I to R with the name "recovery"
+    with the rate law of "g * I". The unit of "g" is "days".
+
+    Add a new transition from S to E that depends on I.
+    The rate law is "b * S * I". The unit of "b" is "1/(persons * days)"
+    ```
+  </Tab>
+  <Tab title="Observables">
+    Define new observable quantities as expressions over state variables.
+
+    ```
+    Add an observable named "Infected" with the expression "Iasym + Isym"
+    ```
+  </Tab>
+  <Tab title="Rate laws">
+    Rewrite the rate law expression for any existing transition.
+
+    ```
+    Change rate law of the transition "Inf" to "S * I * z"
+    ```
+  </Tab>
+  <Tab title="Time units">
+    Set the time unit for the model's ODE time axis.
+
+    ```
+    Specify the time unit of the model to be "days"
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## Resetting edits
+
+Click **Reset** in the operator toolbar to discard all code changes and revert the model preview to the original input model. This resets the Beaker kernel context but does not delete any saved outputs.
+
+---
+
+## AI model simplification
+
+Terarium includes an AI-powered **simplification** capability (backed by the `simplify_model` MIRA task) that can reduce a complex model to a simpler approximation by merging or removing compartments and transitions. This is exposed through the `getSimplifyModel` API call and can be triggered from compatible operators.
+
+Simplification is useful when:
+
+- A stratified model has become too large to calibrate efficiently.
+- You want a reduced-order model for rapid prototyping.
+- Compartments have negligible populations under the current configuration.
+
+<Warning>
+Simplification is a lossy operation. The resulting model may not reproduce all dynamics of the original. Always compare simplified and original models before using the simplified version in production simulations.
+</Warning>
+
+---
+
+## Notebook mode
+
+In addition to the wizard-style LLM prompt, the operator provides a full **Ace editor** (Python, `python3` kernel) where you can write arbitrary MIRA code. The editor is pre-populated with a comment explaining the available context:
+
+```python
+# This environment contains the variable "model"
+# which is displayed on the right
+```
+
+The kernel communicates with the model preview pane via a `model_preview` message: any time the kernel emits this message, the preview is refreshed with the new model state.
+
+Standard output (`stdout`) and error output (`stderr`) from code execution are shown in the traceback panel below the editor. Execution errors are surfaced as inline error cards in the preview pane.

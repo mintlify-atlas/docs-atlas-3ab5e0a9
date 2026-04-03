@@ -1,0 +1,313 @@
+---
+title: "Service integrations"
+description: "How Terarium integrates with MIRA, GoLLM, FUNMAN, CIEMSS, Beaker, and other external services."
+---
+
+Terarium integrates with a set of AI, simulation, and knowledge services. Most integrations use the [async task runner pattern](/developer/task-runner) over RabbitMQ. The CIEMSS and Beaker integrations use direct HTTP instead.
+
+## MIRA
+
+MIRA (Model Intermediate Representation and Analysis) is a Python service that provides model transformation, stratification, and concept comparison capabilities.
+
+**Interface:** RabbitMQ (via `mira-taskrunner`) — the task runner proxies requests to the MIRA REST API at `http://mira:8771`.
+
+**Initiated from:** `MiraController` (`/mira/**`)
+
+<AccordionGroup>
+  <Accordion title="amr_to_mmt — AMR to MIRA Model Template">
+    Converts an AMR (Attributed Model Representation) JSON object to a MIRA Model Template (MMT) format, which exposes the underlying ontological structure of the model.
+
+    **Input:** Serialised AMR JSON (model body without internal Terarium fields)
+
+    **Output:** MMT JSON object
+
+    **Handler:** `AMRToMMTResponseHandler`
+  </Accordion>
+  <Accordion title="sbml_to_petrinet — SBML to Petri net">
+    Converts an SBML (Systems Biology Markup Language) file to a Petri net AMR model. Triggered by uploading an artifact with a `.sbml` or `.xml` extension.
+
+    **Input:** Raw SBML file contents
+
+    **Output:** AMR JSON for a Petri net model
+
+    **Handler:** `SbmlToPetrinetResponseHandler`
+  </Accordion>
+  <Accordion title="stella_to_stockflow — Stella to Stock and Flow">
+    Converts a Stella model file (`.xmile`, `.itmx`, `.stmx`) to a Stock and Flow AMR.
+
+    **Input:** Raw Stella file contents
+
+    **Output:** AMR JSON for a Stock and Flow model
+
+    **Handler:** `StellaToStockflowResponseHandler`
+  </Accordion>
+  <Accordion title="mdl_to_stockflow — MDL to Stock and Flow">
+    Converts a Vensim MDL (`.mdl`) model file to a Stock and Flow AMR.
+
+    **Input:** Raw MDL file contents
+
+    **Output:** AMR JSON for a Stock and Flow model
+
+    **Handler:** `MdlToStockflowResponseHandler`
+  </Accordion>
+  <Accordion title="simplify_model — Model simplification">
+    Simplifies an AMR model by removing redundant or extraneous structure while preserving semantic equivalence.
+
+    **Input:** Serialised AMR JSON
+
+    **Output:** Simplified AMR JSON
+
+    **Handler:** `SimplifyModelResponseHandler`
+  </Accordion>
+  <Accordion title="model_to_latex — AMR to LaTeX">
+    Generates LaTeX equations representing the dynamics of an AMR model.
+
+    **Input:** Serialised AMR JSON
+
+    **Output:** JSON containing LaTeX equation strings
+
+    **Handler:** `GenerateModelLatexResponseHandler`
+  </Accordion>
+  <Accordion title="compare_models_concepts — Concept comparison">
+    Compares the ontological concepts across two or more AMR models and returns a structured comparison report.
+
+    **Input:** List of serialised AMR JSON strings
+
+    **Output:** JSON comparison result
+
+    **Handler:** `CompareModelsConceptsResponseHandler`
+  </Accordion>
+  <Accordion title="latex_to_amr — LaTeX to AMR">
+    Converts LaTeX equation strings into an AMR model representation via the MIRA equation-to-model pipeline.
+
+    **Input:** LaTeX equation strings
+
+    **Output:** AMR JSON model
+
+    **Handler:** `LatexToAMRResponseHandler` (script: `mira_task:latex_to_amr`)
+  </Accordion>
+  <Accordion title="sympy_to_amr — SymPy to AMR">
+    Converts SymPy (Python symbolic math) equation strings into an AMR model representation.
+
+    **Input:** SymPy equation strings
+
+    **Output:** AMR JSON model
+
+    **Handler:** `SympyToAMRResponseHandler` (script: `mira_task:sympy_to_amr`)
+  </Accordion>
+</AccordionGroup>
+
+<Note>
+  All MIRA tasks are dispatched as `TaskType.MIRA` and go to the `mira-taskrunner` container, which then calls the MIRA REST API at `http://mira:8771`.
+</Note>
+
+---
+
+## GoLLM
+
+GoLLM is an LLM-powered AI service that provides model enrichment, configuration, comparison, equation extraction, and document Q&A capabilities. It requires an OpenAI API key.
+
+**Interface:** RabbitMQ (via `gollm-taskrunner`)
+
+**Initiated from:** `GoLLMController` (`/gollm/**`)
+
+<AccordionGroup>
+  <Accordion title="enrich_model — Enrich model metadata">
+    Uses an LLM to populate the `name`, `description`, `parameters`, `states`, and concept annotations of an AMR model, optionally grounding them against a provided research document.
+
+    **Input:** AMR JSON + optional document extraction text
+
+    **Output:** Updated AMR JSON with enriched metadata
+
+    **Handler:** `EnrichModelResponseHandler`
+  </Accordion>
+  <Accordion title="enrich_dataset — Enrich dataset metadata">
+    Populates dataset name, description, and column annotations using LLM inference over dataset contents and an optional reference document.
+
+    **Input:** Dataset CSV rows + optional document extraction text
+
+    **Output:** Updated dataset metadata JSON
+
+    **Handler:** `EnrichDatasetResponseHandler`
+  </Accordion>
+  <Accordion title="configure_model_from_document — Configure model from document">
+    Extracts parameter values and initial conditions from a research document and applies them to a model configuration.
+
+    **Input:** AMR JSON + document extraction text (lightweight extractions)
+
+    **Output:** Model configuration JSON with populated parameter values
+
+    **Handler:** `ConfigureModelFromDocumentResponseHandler`
+  </Accordion>
+  <Accordion title="configure_model_from_dataset — Configure model from dataset">
+    Infers model parameter values from a dataset's columns and rows using LLM reasoning.
+
+    **Input:** AMR JSON + dataset rows (list of CSV strings) + optional matrix string
+
+    **Output:** Model configuration JSON with populated parameter values
+
+    **Handler:** `ConfigureModelFromDatasetResponseHandler`
+  </Accordion>
+  <Accordion title="compare_models — Compare models (textual)">
+    Produces a natural-language comparison of two or more AMR models, optionally guided by a research goal.
+
+    **Input:** List of AMR JSON strings + optional goal string
+
+    **Output:** Markdown/text comparison report
+
+    **Handler:** `CompareModelsResponseHandler`
+  </Accordion>
+  <Accordion title="equations_from_image — Extract equations from image">
+    Extracts mathematical equations from a base64-encoded image (e.g. a scanned figure or screenshot) using a vision-capable LLM.
+
+    **Input:** Base64-encoded image string
+
+    **Output:** LaTeX equation strings
+
+    **Handler:** `EquationsFromImageResponseHandler`
+  </Accordion>
+  <Accordion title="generate_summary — Generate summary">
+    Generates a project-level or asset-level summary using an LLM and an instruction prompt.
+
+    **Input:** Instruction string + optional previous summary ID for iterative refinement
+
+    **Output:** Summary text
+
+    **Handler:** `GenerateSummaryHandler`
+  </Accordion>
+  <Accordion title="chart_annotation — Chart annotation">
+    Generates natural-language annotations for a chart (forecast or calibration), given a preamble describing context and an instruction.
+
+    **Input:** Preamble, instruction, chart type (`FORECAST_CHART` or other)
+
+    **Output:** Annotation text
+
+    **Handler:** `ChartAnnotationResponseHandler`
+  </Accordion>
+  <Accordion title="interventions_from_document / interventions_from_dataset">
+    Extracts intervention specifications (event-based parameter changes) from a document or dataset, grounded against an AMR model's structure.
+
+    **Handler:** `InterventionsFromDocumentResponseHandler` / `InterventionsFromDatasetResponseHandler`
+  </Accordion>
+  <Accordion title="document_question — Document Q&A">
+    Answers a freeform question about the contents of a previously ingested document.
+
+    **Input:** Question string + document extraction text
+
+    **Output:** Answer text
+
+    **Handler:** `DocumentQuestionHandler`
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## FUNMAN
+
+FUNMAN (Functional Model Analysis) validates whether a model configuration is consistent with a set of parameter constraints.
+
+**Interface:** RabbitMQ (via `funman-taskrunner`)
+
+**Initiated from:** `FunmanController` (`/funman/**`)
+
+<AccordionGroup>
+  <Accordion title="validate_model_config — Model configuration validation">
+    Runs a FUNMAN analysis job to verify that the parameter ranges specified in a model configuration satisfy the declared constraints.
+
+    **Input:** AMR JSON + model configuration JSON + constraint specification
+
+    **Output:** Validation result JSON (feasibility verdict, witness parameter values)
+
+    **Handler:** `ValidateModelConfigHandler`
+  </Accordion>
+</AccordionGroup>
+
+<Note>
+  The `funman-taskrunner` container must be run with `platform: linux/amd64` because FUNMAN has no ARM build.
+</Note>
+
+---
+
+## CIEMSS (pyciemss)
+
+The CIEMSS simulation engine provides probabilistic simulation, calibration, optimization, and ensemble capabilities for AMR models.
+
+**Interface:** Direct HTTP REST — hmi-server calls `pyciemss-api` at `http://pyciemss-api:8000`.
+
+**Initiated from:** `SimulationRequestController` (`/simulations/**`)
+
+The pyciemss integration does **not** use the task runner RabbitMQ pattern. Instead, hmi-server submits jobs to the `pyciemss-api` REST endpoint and polls for results. `pyciemss-worker` picks up computation jobs from an internal Redis/RabbitMQ queue and writes results back to hmi-server via the `TDS_URL` environment variable.
+
+| Operation | Description |
+|-----------|-------------|
+| Simulate | Forward-simulate a model configuration over a time horizon |
+| Calibrate | Infer parameter values from observed data |
+| Optimize | Find parameter values that satisfy an objective |
+| Ensemble | Run multiple model configurations and aggregate outputs |
+
+### Data flow
+
+```
+hmi-server  ──POST /simulate──▶  pyciemss-api
+                                    │
+                                    └──▶ pyciemss-worker (compute)
+                                              │
+                                              └──POST result──▶ hmi-server /simulations/{id}
+```
+
+Results (CSV files) are stored in MinIO under the `simulations/` path and referenced by the `Simulation` entity.
+
+---
+
+## Beaker
+
+Beaker is a Jupyter-based interactive notebook server that allows users to run Python code, interact with Terarium data, and build analyses inside the application.
+
+**Interface:** HTTP and WebSocket proxy — hmi-server proxies requests to Beaker at `http://beaker:8888/beaker/`.
+
+**Initiated from:** `TGPTController` (proxies `/beaker/**`)
+
+| Configuration | Value |
+|--------------|-------|
+| App URL | `http://beaker:8888/beaker/` |
+| Base path | `/beaker/` |
+| WebSocket URL | `ws://beaker:8888/beaker_ws/` |
+| Auth token | `TGPT_TOKEN` environment variable |
+
+The frontend embeds the Beaker UI in an iframe and communicates with it via the WebSocket connection for real-time notebook execution feedback.
+
+---
+
+## DKG (Domain Knowledge Graph)
+
+The DKG provides a curated ontology of epidemiological and scientific concepts used for grounding model parameters and states to standardised identifiers.
+
+**Interface:** Elasticsearch — the DKG is loaded as a JSONL file into MinIO at startup and indexed into Elasticsearch under the `epi_dkg_*` and `climate_dkg_*` indices.
+
+**Initiated from:** `DKGController` (`/dkg/**`)
+
+The `migrate-minio` container extracts chunked DKG JSONL archives from the `askem-static-storage` bucket on first startup. hmi-server's DKG service queries Elasticsearch to resolve concept names and CURIEs for model enrichment and concept comparison workflows.
+
+| Index | Dataset |
+|-------|---------|
+| `epi_dkg_20250128` | Epidemiology DKG |
+| `climate_dkg_20241025` | Climate DKG |
+
+---
+
+## OCR extraction
+
+Document extraction (text, equations, tables) is performed by the `ocr-extraction-taskrunner`, which uses a document AI API (backed by the `ASKEM_DOC_AI_API_KEY` environment variable).
+
+**Interface:** RabbitMQ (via `ocr-extraction-taskrunner`)
+
+**Initiated from:** `KnowledgeController` (`/knowledge/**`)
+
+| Handler | Task |
+|---------|------|
+| `ExtractTextResponseHandler` | Extract plain text from a document |
+| `ExtractEquationsResponseHandler` | Extract equations from a document |
+| `ExtractTablesResponseHandler` | Extract tabular data from a document |
+| `OCRExtractionResponseHandler` | General OCR extraction |
+
+Extraction results are stored on the `DocumentAsset.extraction` field and made available to downstream GoLLM tasks (model enrichment, document Q&A, etc.).

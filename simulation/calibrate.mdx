@@ -1,0 +1,93 @@
+---
+title: "Calibrate"
+description: "Fit model parameters to observed data using Bayesian inference through the CIEMSS calibration engine."
+---
+
+The **Calibrate** operator adjusts the initial values and rate parameters of a model so that its trajectories match a provided dataset as closely as possible. It uses Bayesian inference (stochastic gradient variational inference) rather than simple least-squares fitting, so the output is a *distribution* over parameter values rather than a single point estimate. The calibrated distributions are stored back into a new model configuration that you can use in downstream simulation runs.
+
+## Inputs and outputs
+
+| Port | Type | Required |
+|------|------|----------|
+| Model configuration | `modelConfigId` | Yes |
+| Dataset | `datasetId` | Yes |
+| Intervention policy | `policyInterventionId` | No |
+| **Output: Model configuration or dataset** | `modelConfigId\|datasetId` | — |
+
+The dataset should contain one column for the time variable and one or more columns for observed quantities. The model configuration provides the prior parameter distributions and initial conditions.
+
+## Running calibration
+
+<Steps>
+  <Step title="Connect inputs">
+    Connect a **Model configuration** node and a **Dataset** node to the **Calibrate** operator. Optionally connect an intervention policy if the observed data was collected under a known intervention.
+  </Step>
+  <Step title="Set up the variable mapping">
+    Open the **Calibration settings** sidebar. Under **Mapping**, select the dataset column that represents time using the **Dataset: Timeline variable** dropdown.
+
+    Then add one or more variable mappings: for each row, select a model state variable (or observable) in the **Model: Other variables** column and the corresponding dataset column in the **Dataset: Other variables** column.
+
+    <Note>
+      You can map multiple variables. Each mapping tells the calibration engine which observation to compare against which model output when computing the loss.
+    </Note>
+  </Step>
+  <Step title="Configure calibration settings">
+    Set the end time, number of iterations, and other solver options (see [Parameters](#parameters) below).
+  </Step>
+  <Step title="Run">
+    Click **Run**. The operator first runs a pre-calibration forward simulation, then performs iterative gradient-based parameter updates. Progress is shown as a percentage.
+  </Step>
+  <Step title="Inspect results">
+    When calibration completes, the preview panel shows trajectory charts comparing pre- and post-calibration runs against the observed data, as well as the loss curve over iterations.
+  </Step>
+</Steps>
+
+## Parameters
+
+<Note>
+  Use the **Preset** dropdown to quickly apply either the **Fast** preset (fewer samples and iterations, Euler solver) or the **Normal** preset (100 samples, 100 iterations, `dopri5` solver, learning rate 0.03).
+</Note>
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| End time | `90` | Final timestep for the calibration simulation. |
+| Number of iterations | `100` | How many gradient update steps to perform. More iterations improve fit but take longer. |
+| Number of samples | `100` | Particles used per iteration for gradient estimation. |
+| Learning rate | `0.03` | Step size for the optimizer. Lower values converge more slowly but more stably. |
+| Step size | `1` | Fixed step size for the ODE solver (used with `rk4` and `euler`). |
+| Solver method | `dopri5` | ODE integration method. See [Simulate — Parameters](/simulation/simulate#parameters) for options. |
+| Number of timepoints | Matches end time | Number of output timesteps to record. Enable the checkbox to override. |
+
+<Warning>
+  Setting the learning rate too high can cause the optimization to diverge. If the loss curve spikes upward and does not recover, reduce the learning rate and re-run.
+</Warning>
+
+## Interpreting results
+
+### Trajectory comparison
+
+The main chart section overlays three sets of trajectories for each mapped variable:
+
+- **Before calibration** — trajectories drawn from the prior model configuration
+- **After calibration** — trajectories drawn from the updated parameter distributions
+- **Observations** — the actual data points from your dataset
+
+After a successful calibration the post-calibration trajectories should visually surround the observation points more closely than the pre-calibration trajectories.
+
+### Loss curve
+
+The **Show loss chart** toggle (enabled by default) displays the training loss value at each iteration. A healthy calibration shows a loss that decreases steadily and then plateaus. If the loss does not decrease, the mapping may be incorrect or the learning rate may need adjustment.
+
+<Tip>
+  If calibration produces a flat loss curve from the first iteration, check that the **Timeline variable** mapping points to a column with monotonically increasing numeric values. Calibration will silently skip timesteps that cannot be aligned.
+</Tip>
+
+### Parameter distributions
+
+After calibration the output model configuration contains updated parameter distributions. Open this configuration in a **Model configuration** node to inspect the individual parameter posteriors before using the result in a simulation.
+
+## Using calibrated results
+
+The **Calibrate** operator outputs both an updated model configuration and the post-calibration forecast dataset. Connect the model configuration output to a **Simulate** node to run further forward simulations using the calibrated parameter distributions.
+
+Click **Reset** in the settings sidebar to clear the current run results and return the operator to its initial state, keeping the mapping and settings you configured.

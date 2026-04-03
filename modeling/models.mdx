@@ -1,0 +1,151 @@
+---
+title: "Models"
+description: "Understand what a model is in Terarium, how to import one, and how to use the model operator on the workflow canvas."
+---
+
+A **model** in Terarium is a mathematical representation of a dynamic system — such as an epidemiological disease process, a biological regulatory network, or a resource flow — stored in the **Algebraic Model Representation (AMR)** format. AMR is an open JSON schema developed by the ASKEM program that captures the full structure of a model: its state variables, parameters, transitions, rate laws, observables, and semantic metadata.
+
+Terarium supports three AMR schema variants:
+
+| Schema | Description |
+|---|---|
+| `petrinet` | Compartmental models expressed as Petri nets (e.g., SIR, SEIR, SEIRHD) |
+| `stockflow` | Stock-and-flow models used for system dynamics (e.g., STELLA, MDL) |
+| `regnet` | Regulatory network models encoding gene or species interaction graphs |
+
+---
+
+## Importing a model
+
+Terarium accepts models from several sources. You can upload files directly from the resource panel or use the **Create model from equations** operator on the workflow canvas.
+
+<Tabs>
+  <Tab title="AMR JSON">
+    Upload a `.json` file that conforms to the AMR schema. Terarium validates the file by checking for a `header.schema` and `header.schema_name` field that matches one of the supported schema names (`petrinet`, `stockflow`, or `regnet`).
+
+    ```json
+    {
+      "header": {
+        "name": "SIR Model",
+        "schema": "https://raw.githubusercontent.com/DARPA-ASKEM/Model-Representations/petrinet_v0.6/petrinet/petrinet_schema.json",
+        "schema_name": "petrinet",
+        "description": "A simple SIR model"
+      },
+      "model": { ... },
+      "semantics": { ... }
+    }
+    ```
+  </Tab>
+  <Tab title="SBML">
+    Upload a Systems Biology Markup Language (`.xml`) file. The MIRA service converts it to the PetriNet AMR schema automatically via the `sbml_to_petrinet` task.
+  </Tab>
+  <Tab title="STELLA (.stmx)">
+    Upload a STELLA model file (`.stmx`). Terarium converts it to the StockFlow AMR schema using the `stella_to_stockflow` task.
+  </Tab>
+  <Tab title="MDL">
+    Upload an MDL (Model Definition Language) file used by system dynamics tools. Terarium converts it to the StockFlow AMR schema using the `mdl_to_stockflow` task.
+  </Tab>
+  <Tab title="From equations">
+    Use the **Create model from equations** operator to extract a model from LaTeX equations — either entered manually, pasted from a screenshot, or extracted from a connected document. See [Model from equations](#model-from-equations) below.
+  </Tab>
+</Tabs>
+
+<Note>
+When you upload an archive (`.modelconfig`) file, Terarium automatically imports both the model and its associated model configuration in a single step.
+</Note>
+
+---
+
+## Model operator
+
+The **Model** operator is the starting point for any modeling workflow in Terarium. Add it to the canvas from the operator palette to select an existing model from your project.
+
+**Inputs:** None
+
+**Outputs:** `Model` — a model ID passed downstream to configure, edit, stratify, or simulate.
+
+Once you select a model in the operator panel, the operator becomes active and you can connect it to downstream operators such as **Configure model**, **Edit model**, or **Stratify model**.
+
+---
+
+## Model structure
+
+Every AMR model contains the following top-level sections:
+
+<CardGroup cols={2}>
+  <Card title="Header" icon="tag">
+    Name, description, schema URL, schema name, and model framework identifier. The `schema_name` field determines how Terarium interprets the rest of the document.
+  </Card>
+  <Card title="Model" icon="diagram-project">
+    The structural topology of the model. For PetriNet models this contains `states` and `transitions`. For StockFlow models it contains `stocks`, `flows`, `auxiliaries`, and `links`. For RegNet models it contains `vertices` and `edges`.
+  </Card>
+  <Card title="Semantics" icon="function">
+    The ODE (Ordinary Differential Equation) semantics layer. Contains `initials` (starting values for each state), `parameters` (constant or tunable values), `rates` (transition rate law expressions in both string and MathML form), `observables` (derived output expressions), and `time` (units for the time axis).
+  </Card>
+  <Card title="Metadata" icon="circle-info">
+    Human-readable enrichment: prose descriptions, concept groundings (ontology mappings), and provenance. Metadata does not affect simulation but supports search and interpretation.
+  </Card>
+</CardGroup>
+
+### State variables
+
+State variables (called `states` in the AMR) represent the quantities that change over time — for example `S` (Susceptible), `I` (Infected), and `R` (Recovered) in an SIR model. Each state has:
+
+- **id** — unique identifier used in rate expressions
+- **name** — human-readable label
+- **description** — optional prose explanation
+- **units** — optional unit expression
+- **grounding** — optional ontology concept and modifiers (used during stratification)
+
+### Parameters
+
+Parameters are constant or tuneable scalars that appear in rate laws. Each parameter has:
+
+- **id** — identifier referenced in rate expressions
+- **name** — display label
+- **description** — optional prose
+- **value** — default numeric value
+- **units** — optional unit expression
+- **distribution** — optional prior distribution (constant, uniform, etc.)
+
+### Transitions and rates
+
+Transitions define the directed flows between state variables. Each transition has an `id`, input states (`input`), output states (`output`), and a `rate` law expression. Rate laws are stored as both a human-readable string and a MathML expression.
+
+### Observables
+
+Observables are derived quantities computed from states and parameters (e.g., `TotalInfected = I + H`). They are defined in the `semantics.ode.observables` list and can be targeted by model configurations and simulation outputs.
+
+---
+
+## Model from equations
+
+The **Create model from equations** operator lets you generate an AMR model from mathematical equations rather than uploading a file.
+
+<Steps>
+  <Step title="Add the operator">
+    Add the **Create model from equations** operator to the workflow canvas. Optionally connect a **Document** input to auto-populate equations extracted from the document.
+  </Step>
+  <Step title="Specify equations">
+    Enter LaTeX equations in the text area, paste a screenshot of equations, or drag and drop an image. Use the **Add** button to queue each equation. You can also choose from built-in examples (SIR, SEIHRD).
+  </Step>
+  <Step title="Choose a framework">
+    Select the target AMR schema (`petrinet` is the default). The AI extraction pipeline (`latex_to_amr` / `sympy_to_amr`) will attempt to map the equations to the chosen framework.
+  </Step>
+  <Step title="Create the model">
+    Click **Create Model**. Terarium sends the equations to the MIRA service, which uses symbolic math and LLM assistance to produce an AMR JSON. The resulting model appears in the preview pane.
+  </Step>
+  <Step title="Review and save">
+    Inspect the generated model in the preview. If the model looks correct, advance to step 2 in the operator to name it and save it to your project.
+  </Step>
+</Steps>
+
+<Tip>
+You can paste a screenshot of equations directly into the equation input area. Terarium will convert the image to LaTeX automatically before extraction.
+</Tip>
+
+---
+
+## Model comparison
+
+Terarium includes a **Model comparison** operator that accepts two or more model inputs and generates a side-by-side structural comparison using the MIRA `model_comparison` task. Use it to understand how two variants of a model differ in their states, transitions, and parameters before deciding which to use downstream.

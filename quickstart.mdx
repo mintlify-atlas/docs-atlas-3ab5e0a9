@@ -1,80 +1,146 @@
 ---
 title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+description: "Get Terarium running locally with Docker Compose and create your first project."
 ---
 
-## Get started in three steps
+This guide walks you through launching Terarium on your local machine and completing your first end-to-end workflow: create a project, add a model, and run a simulation.
 
-Get your documentation site running locally and make your first customization.
+## Prerequisites
 
-### Step 1: Set up your local environment
+- [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/) installed
+- An [OpenAI API key](https://platform.openai.com/api-keys) (required for AI-assisted features)
+- Git
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+## Set up and launch
 
-### Step 2: Deploy your changes
+<Steps>
+  <Step title="Clone the repository">
+    Clone the Terarium repository and navigate to the `deploy` directory:
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+    ```bash
+    git clone https://github.com/DARPA-ASKEM/terarium.git
+    cd terarium/deploy
+    ```
+  </Step>
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+  <Step title="Create your environment file">
+    Copy the environment template to create your local `.env` file:
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+    ```bash
+    cp .env_template .env
+    ```
 
-### Step 3: Go live
+    Open `.env` and add your OpenAI API key:
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+    ```bash
+    # macOS
+    local_host_name=host.docker.internal
+    # Linux (uncomment the line below and comment out the macOS line above)
+    # local_host_name=localhost
+
+    # OpenAI connection details
+    secret_openai_key=sk-...your-key-here...
+    ```
+
+    <Note>
+      On Linux, set `local_host_name=localhost` instead of `host.docker.internal`. The template includes both options as comments.
+    </Note>
+  </Step>
+
+  <Step title="Add hostname entries">
+    Terarium routes internal traffic through named hosts for Keycloak (authentication) and MinIO (object storage). Add these entries to your hosts file so your browser can resolve them:
+
+    **Linux / macOS** — edit `/etc/hosts`:
+
+    ```bash
+    sudo sh -c 'echo "127.0.0.1  keycloak" >> /etc/hosts'
+    sudo sh -c 'echo "127.0.0.1  minio" >> /etc/hosts'
+    ```
+
+    **Windows** — add the same two lines to `C:\Windows\System32\drivers\etc\hosts` using a text editor run as Administrator:
+
+    ```
+    127.0.0.1  keycloak
+    127.0.0.1  minio
+    ```
+  </Step>
+
+  <Step title="Start all services">
+    From the `deploy` directory, start the full stack in the background:
+
+    ```bash
+    docker compose up -d
+    ```
+
+    Docker Compose pulls all required images and starts them in dependency order. On first run, pulling images and initializing MinIO buckets may take several minutes.
+
+    <Tip>
+      Monitor startup progress with `docker compose logs -f hmi-client`. The UI container waits for `hmi-server` to pass its health check before it starts accepting traffic.
+    </Tip>
+  </Step>
+
+  <Step title="Open the application">
+    Once the containers are running, open your browser and navigate to:
+
+    **[http://localhost:8080](http://localhost:8080)**
+
+    Log in using one of the default accounts:
+
+    | Username | Password  | Role  |
+    |----------|-----------|-------|
+    | adam     | admin123  | Admin |
+    | ursula   | user123   | User  |
+
+    <Warning>
+      These credentials are for local development only. Do not expose this deployment to public networks without changing all default passwords.
+    </Warning>
+  </Step>
+</Steps>
+
+## First workflow: create a project and run a simulation
+
+Once you are logged in, follow these steps to complete your first end-to-end workflow.
+
+<Steps>
+  <Step title="Create a project">
+    On the home screen, click **New project** and give your project a name. Projects are the top-level container for all your models, datasets, documents, and workflows.
+  </Step>
+
+  <Step title="Add a model">
+    Inside your project, open the **Resources** panel and click **Add model**. You can:
+
+    - Upload a model file (AMR JSON, SBML, or STELLA format)
+    - Extract a model from a scientific paper by uploading a PDF
+    - Browse the built-in model catalog
+
+    For a quick start, use the model catalog to add a pre-built SIR epidemiological model.
+  </Step>
+
+  <Step title="Open the workflow canvas">
+    Click **New workflow** to open the visual canvas. Drag your model from the resources panel onto the canvas. This creates a model node.
+  </Step>
+
+  <Step title="Configure and simulate">
+    1. Connect a **Model configuration** node to your model node. Adjust initial conditions and parameters as needed.
+    2. Connect a **Simulate** node to the configuration node.
+    3. Click **Run** on the Simulate node to execute the simulation.
+    4. Results appear as a time-series chart directly on the canvas.
+  </Step>
+</Steps>
 
 ## Next steps
 
-Now that you have your docs running, explore these key features:
-
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="Deployment" icon="server" href="/deployment">
+    Understand the services that make up Terarium and how to configure them.
+  </Card>
+  <Card title="Projects" icon="folder" href="/concepts/projects">
+    Learn how to organize research with projects and share them with collaborators.
+  </Card>
+  <Card title="Modeling" icon="diagram-project" href="/modeling/models">
+    Import, edit, and configure scientific models.
+  </Card>
+  <Card title="Simulation & Analysis" icon="chart-line" href="/simulation/simulate">
+    Run simulations, calibrate parameters, and optimize interventions.
+  </Card>
 </CardGroup>
-
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>

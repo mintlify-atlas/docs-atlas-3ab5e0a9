@@ -1,0 +1,109 @@
+---
+title: "Documents"
+description: "Upload scientific papers and reports, view them in the workflow canvas, and use them as sources for AI-assisted model extraction and configuration."
+---
+
+Documents in Terarium are scientific papers, technical reports, and other PDF or text files stored inside a project. They serve two roles: you can read them directly within the platform, and you can feed them into AI-assisted workflows to extract models, equations, and parameter values.
+
+## Adding documents to a project
+
+<Tabs>
+  <Tab title="Upload a file">
+    <Steps>
+      <Step title="Open the Resources panel">
+        Inside your project, open the **Resources** panel on the left sidebar.
+      </Step>
+      <Step title="Add a document">
+        Click **Add document**, then select **Upload file**.
+      </Step>
+      <Step title="Choose your file">
+        Select a `.pdf` or plain-text file from your local machine. Terarium creates a document asset with the same name as the file and stores it in the project.
+      </Step>
+    </Steps>
+  </Tab>
+  <Tab title="Import from GitHub">
+    <Steps>
+      <Step title="Open the Resources panel">
+        Inside your project, click **Add document** and choose **Import from GitHub**.
+      </Step>
+      <Step title="Provide the repository details">
+        Enter the repository owner and name, along with the path to the file within the repository (for example, `papers/sir-model.pdf`).
+      </Step>
+      <Step title="Confirm import">
+        Terarium fetches the file from GitHub and registers it as a document asset in your project.
+      </Step>
+    </Steps>
+  </Tab>
+</Tabs>
+
+## Viewing documents
+
+Click any document in the **Resources** panel to open it in the asset viewer. Terarium renders:
+
+- **PDFs** — inline in a full-featured PDF viewer with page navigation and zoom
+- **Plain text files** — in a read-only text editor
+
+The asset viewer is also accessible from the Document operator drilldown panel on the workflow canvas.
+
+## Document operator
+
+The **Document** operator places a document onto the workflow canvas so it can be used as an input to model extraction and configuration steps.
+
+<Steps>
+  <Step title="Add the operator">
+    On the workflow canvas, open the operator library and drag a **Document** node onto the canvas.
+  </Step>
+  <Step title="Select a document">
+    Open the node's drilldown panel and choose a document from your project resources. The panel displays the document content — the PDF renders inline, or plain text appears in a text editor.
+  </Step>
+  <Step title="Connect to downstream operators">
+    The Document node exposes a single `Document` output port. Connect it to any operator that accepts a document input, such as **Extract model from document** or **Configure model from document**.
+  </Step>
+</Steps>
+
+<Info>
+  The Document node shows a progress bar while Terarium processes the document (for example, while running PDF extraction). The `taskProgress` value on the node state reflects extraction completion as a value between 0 and 1.
+</Info>
+
+## What can be extracted from documents
+
+When you trigger extraction on a document, Terarium runs its knowledge extraction pipeline to pull structured content from the file:
+
+<CardGroup cols={2}>
+  <Card title="Text" icon="file-lines">
+    Full document text extracted page by page. Used to search for parameter descriptions, model assumptions, and scientific context.
+  </Card>
+  <Card title="Tables" icon="table">
+    Structured tables parsed from the PDF. Tables can be imported directly as datasets or used to ground model parameters.
+  </Card>
+  <Card title="Equations" icon="square-root-variable">
+    Mathematical expressions detected in the text. Equations in LaTeX or MathML format can be converted directly into model structure.
+  </Card>
+  <Card title="Figures and images" icon="image">
+    Figures are identified during extraction. OCR applies to image-heavy or scanned pages to recover text that is not embedded in the PDF.
+  </Card>
+</CardGroup>
+
+## Using documents for model extraction and configuration
+
+Documents are the primary source for AI-assisted model building in Terarium.
+
+**Extracting a model from a paper:**
+
+1. Connect a Document node to an **Extract model** operator on the canvas.
+2. The extraction pipeline reads the document's equations and text, then uses the AI backend to construct an AMR (ASKEM Model Representation) model from the identified differential equations.
+3. Review and edit the extracted model in the model editor before using it in a simulation.
+
+**Configuring a model from a paper:**
+
+1. Connect a Document node and a Model node to a **Configure model** operator.
+2. The AI assistant reads the document text to find parameter values, initial conditions, and units that correspond to your model's variables.
+3. Proposed values appear in the configuration panel for you to accept, modify, or reject.
+
+<Tip>
+  AI configuration works best when the connected document explicitly states numerical values for the parameters in your model. Ambiguous or missing values are flagged so you can supply them manually.
+</Tip>
+
+<Note>
+  To trigger PDF extraction explicitly (for example, to index a document before using it in AI workflows), open the document in the **Resources** panel and use the enrichment action. Extraction runs asynchronously; a status event notifies the UI when it completes.
+</Note>

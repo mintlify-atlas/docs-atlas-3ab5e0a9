@@ -1,0 +1,143 @@
+---
+title: "Knowledge extraction"
+description: "How Terarium turns scientific PDFs into structured knowledge — extracted text, tables, equations, and model structure — ready for use in modeling workflows."
+---
+
+Knowledge extraction is the process Terarium uses to convert unstructured scientific documents into structured artifacts that can feed directly into model building. When you upload a PDF and trigger extraction, a pipeline of specialized services works through the document page by page and returns text, tables, equations, and images that the rest of the platform can reason over.
+
+## Extraction pipeline overview
+
+```
+PDF document
+    │
+    ▼
+┌─────────────────────────┐
+│  Text extraction        │  pdftotext + OCR fallback
+└────────────┬────────────┘
+             │
+    ▼
+┌─────────────────────────┐
+│  Table extraction       │  Structured table parser
+└────────────┬────────────┘
+             │
+    ▼
+┌─────────────────────────┐
+│  Equation detection     │  LaTeX / MathML identification
+└────────────┬────────────┘
+             │
+    ▼
+┌─────────────────────────┐
+│  Concept grounding      │  DKG lookup
+└────────────┬────────────┘
+             │
+    ▼
+Structured knowledge ready for modeling
+```
+
+Triggering extraction sends the document to the `pdf-extractions` endpoint (`POST /knowledge/pdf-extractions?document-id={id}`). The server dispatches asynchronous tasks for each extraction type. The client subscribes to `ClientEventType.Extraction` events and updates the UI as each task completes.
+
+## Text extraction
+
+Text extraction reads each page of the PDF and returns an array of per-page strings.
+
+**How it works:**
+
+1. `pdftotext` runs first. This tool extracts text that is already embedded in the PDF as selectable characters.
+2. For pages that return no text (common with scanned documents or image-heavy layouts), `ocrmypdf` applies optical character recognition using a force-OCR pass.
+3. The pipeline merges both results: embedded text is used where it exists, OCR output fills in the gaps.
+
+The result is a page-indexed array of strings stored alongside the document asset. Downstream AI features use this text to search for parameter values, model assumptions, variable definitions, and narrative context.
+
+<Note>
+  The OCR step uses `ocrmypdf` with the `--force-ocr --skip-text` flags, which means it re-processes all pages through Tesseract even if some already contain embedded text. The merge step then selects the best result per page.
+</Note>
+
+## Table extraction
+
+The `table_extraction_task:extract_tables` handler identifies tabular structures within a PDF and returns them as structured JSON.
+
+Extracted tables can be:
+
+- Viewed within the document panel in Terarium
+- Imported directly as datasets and connected to calibration or comparison operators
+- Used by the AI configuration assistant to populate model parameter values
+
+<Tip>
+  Tables that report parameter estimates, initial conditions, or time-series observations are especially useful for AI-assisted model configuration. When you connect a document to a **Configure model** operator, the system searches extracted tables alongside the document text.
+</Tip>
+
+## Equation extraction
+
+Equations extracted from documents are the primary input for building new models from papers.
+
+**Extraction flow:**
+
+1. The extraction pipeline identifies mathematical expressions in the document text — both inline equations and display-mode blocks.
+2. Equations are returned as LaTeX or MathML strings.
+3. Before conversion, the `clean-equations` service (`POST /knowledge/clean-equations`) normalizes the representations, fixing common formatting issues.
+4. The cleaned equations are submitted to `POST /knowledge/equations-to-model`, which uses the AI backend to construct an AMR model.
+
+```json
+// Example request to equations-to-model
+{
+  "equations": [
+    "\\frac{dS}{dt} = -\\beta S I",
+    "\\frac{dI}{dt} = \\beta S I - \\gamma I",
+    "\\frac{dR}{dt} = \\gamma I"
+  ],
+  "documentId": "doc-abc123"
+}
+```
+
+The response is a model ID for an AMR that you can open in the model editor, configure, and simulate.
+
+<Info>
+  You can also supply equations manually — for example, by typing or pasting LaTeX strings into the **Extract model from equations** operator — without needing a source document.
+</Info>
+
+## OCR for scanned documents
+
+Many scientific documents, particularly older papers and government reports, are distributed as scanned image PDFs. Standard text extraction returns nothing for these files.
+
+Terarium handles scanned documents automatically:
+
+- If `pdftotext` returns an empty string for a page, the OCR path kicks in via `ocrmypdf`.
+- `ocrmypdf` processes the page through Tesseract OCR and writes a new PDF with a text layer added.
+- The text layer is then read with PyMuPDF (`fitz`) to produce the final per-page text output.
+
+No manual configuration is required. The pipeline detects and handles mixed documents — pages with embedded text coexist with scanned pages in the same extraction run.
+
+## Domain Knowledge Graph (DKG) concept grounding
+
+After extraction, Terarium can look up extracted terms against the **Domain Knowledge Graph (DKG)** — a structured ontology of scientific concepts drawn from sources such as the MIRA modeling framework's domain ontologies.
+
+Concept grounding links extracted variables and column names to canonical identifiers (CURIEs), making it possible to:
+
+- Automatically match dataset columns to model variables
+- Annotate model parameters with standard ontology terms
+- Enable cross-document and cross-model comparison using shared concept references
+
+You can view and edit concept groundings for dataset columns in the **Column information** section of the Dataset drilldown panel. Each column can be tagged with one or more CURIE identifiers (for example, `ido:0000511` for "infectious population").
+
+## From extracted knowledge to models and datasets
+
+Knowledge extraction connects directly to the modeling and data workflows:
+
+<CardGroup cols={2}>
+  <Card title="Equations → models" icon="arrow-right">
+    Extracted equations flow into the **Extract model from document** operator, which produces an AMR model you can configure and simulate.
+  </Card>
+  <Card title="Tables → datasets" icon="arrow-right">
+    Extracted tables can be imported as datasets and connected to **Calibrate** or **Compare datasets** operators.
+  </Card>
+  <Card title="Text → parameter values" icon="arrow-right">
+    The AI configuration assistant reads extracted text to suggest parameter values and initial conditions for your model.
+  </Card>
+  <Card title="Concepts → groundings" icon="arrow-right">
+    DKG lookups annotate model variables and dataset columns with ontology identifiers, enabling automated variable matching.
+  </Card>
+</CardGroup>
+
+<Warning>
+  Extraction quality depends on the source document. PDFs with complex two-column layouts, embedded figures, or non-standard equation rendering may produce incomplete results. Review extracted equations and tables before using them to build or configure models.
+</Warning>

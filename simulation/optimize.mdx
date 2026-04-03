@@ -1,0 +1,115 @@
+---
+title: "Optimize"
+description: "Find intervention policies that satisfy outcome constraints using the CIEMSS optimization engine."
+---
+
+The **Optimize intervention policy** operator searches for the best values of an intervention policy's parameters—such as the timing or magnitude of a parameter change—so that the resulting model trajectories satisfy one or more outcome criteria. It uses the `basinhopping` global optimizer with a `COBYLA` local minimizer, both backed by the CIEMSS probabilistic ODE solver.
+
+A typical use case is: *"Given that I can apply a drug at some point between day 10 and day 30, what start time minimizes peak hospitalizations while keeping cumulative infections below 10,000?"*
+
+## Inputs and outputs
+
+| Port | Type | Required |
+|------|------|----------|
+| Model configuration | `modelConfigId` | Yes |
+| Intervention policy | `policyInterventionId` | Yes |
+| **Output: Intervention policy or dataset** | `policyInterventionId\|datasetId` | — |
+
+The intervention policy defines *what* can be changed (which parameter, static or dynamic intervention type). The optimization engine determines *when* and *by how much* to make that change within the bounds you specify.
+
+## Setting up optimization
+
+<Steps>
+  <Step title="Connect inputs">
+    Connect a **Model configuration** node and an **Intervention policy** node to the **Optimize intervention policy** operator.
+  </Step>
+  <Step title="Define success criteria">
+    Open the settings sidebar. Under **Success criteria**, each criterion group specifies:
+
+    - **Target variable** — the model state or observable to evaluate
+    - **Method** — `max` (evaluate the peak value across the run) or `day_average` (evaluate the value at the final timestep)
+    - **Risk tolerance** — the percentile threshold (default 95). The optimizer targets the average of the worst `100 − risk_tolerance` percent of samples.
+    - **Threshold** — the maximum (or minimum) acceptable value
+    - **Minimize / maximize** toggle — whether lower or higher values of the target variable are desired
+
+    Click **Add new criterion** to add additional constraints.
+  </Step>
+  <Step title="Configure intervention policy groups">
+    Under **Intervention policy**, each intervention in your attached policy appears as a group. For each group, specify:
+
+    - **Optimization type** — what the optimizer is allowed to change: `new value`, `new start time`, or `new value and start time`
+    - **Bounds** — the lower and upper limits of the search space
+    - **Initial guess** — the starting point for the local optimizer
+    - **Relative importance** — how much weight this intervention carries when multiple interventions are present
+  </Step>
+  <Step title="Set optimization settings">
+    Configure the time horizon and solver options under **Optimization settings** (see [Parameters](#parameters) below).
+  </Step>
+  <Step title="Run">
+    Click **Run**. The operator runs a pre-optimization simulation, then iterates through candidate policies using the optimizer, evaluating each against the success criteria. Progress is shown as a percentage.
+  </Step>
+</Steps>
+
+## Parameters
+
+<Note>
+  Use the **Preset** dropdown for a quick start. **Fast** runs one sample with the Euler solver for rapid iteration. **Normal** uses 100 samples with `dopri5`.
+</Note>
+
+### Simulation settings
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| End time | `90` | Final timestep for each candidate simulation. |
+| Number of samples | `100` | Particles simulated per candidate policy evaluation. |
+| Solver method | `dopri5` | ODE integration method. |
+| Solver step size | `0.1` | Fixed step size when using `rk4` or `euler`. |
+| Number of timepoints | Matches end time | Recorded output timesteps. |
+
+### Optimizer settings
+
+These are available under **Show additional options**.
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| Algorithm | `basinhopping` | Global optimization algorithm (fixed). |
+| Minimizer method | `COBYLA` | Local optimization method used at each basin (fixed). |
+| Maxiter | `5` | Maximum basin-hopping iterations. |
+| Maxfeval | `25` | Maximum function evaluations per local minimization step. |
+
+<Warning>
+  Optimization is computationally expensive. Start with the **Fast** preset and a small `maxiter` value to verify your setup before running a high-quality optimization.
+</Warning>
+
+## Intervention objective types
+
+Each intervention group supports one of three optimization objectives:
+
+<AccordionGroup>
+  <Accordion title="New value">
+    The optimizer finds the best parameter value to apply. You provide the start time and the optimizer searches within `[lower_bound, upper_bound]` for the parameter value. Set `initial_guess` to a reasonable starting point.
+  </Accordion>
+  <Accordion title="New start time">
+    The optimizer finds the best time at which to apply the intervention. You provide the parameter value and the optimizer searches within `[start_time_lower_bound, start_time_upper_bound]`.
+  </Accordion>
+  <Accordion title="New value and start time">
+    The optimizer simultaneously searches for the best parameter value and the best start time, giving it the most freedom but also the largest search space.
+  </Accordion>
+</AccordionGroup>
+
+## Interpreting results
+
+### Before and after comparison
+
+The preview panel shows trajectory charts for each model variable with two sets of traces:
+
+- **Before optimization** — trajectories under the unoptimized policy
+- **After optimization** — trajectories under the optimized policy
+
+The optimized policy should show the target variables pushed toward the desired direction (lower peak, later crossing of a threshold, etc.).
+
+### Optimized intervention policy
+
+When the run completes, the operator outputs a new intervention policy that contains the optimized parameter values and/or start times. Connect this output to a **Simulate** node to run a full-resolution simulation with the optimized settings, or to another **Optimize** node for further refinement.
+
+Click **Reset** to clear results and return the operator to its initial state.

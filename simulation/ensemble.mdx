@@ -1,0 +1,110 @@
+---
+title: "Ensemble simulation"
+description: "Combine multiple model configurations into a weighted ensemble to account for structural model uncertainty."
+---
+
+Ensemble methods run several model configurations simultaneously and aggregate their outputs into a single set of trajectories. This lets you incorporate *structural uncertainty*—uncertainty that comes from not knowing which model formulation is correct—in addition to the parametric uncertainty already captured within each individual configuration.
+
+Terarium provides two ensemble operators:
+
+- **Simulate ensemble** — runs a forward simulation over a set of model configurations
+- **Calibrate ensemble** — fits a set of model configurations to observed data and also infers the weight of each configuration
+
+## Simulate ensemble
+
+The **Simulate ensemble** operator accepts two or more model configurations, assigns relative weights to each, and runs a single joint simulation that samples trajectories from the mixture.
+
+### Inputs and outputs
+
+| Port | Type | Required |
+|------|------|----------|
+| Model configuration (×2 or more) | `modelConfigId` | Yes |
+| **Output: Dataset** | `datasetId` | — |
+
+Connect at least two model configuration nodes. Each must be a distinct configuration — the operator enforces `uniqueInputs`.
+
+### Variable mapping
+
+Because each model configuration may use different variable names for equivalent quantities, you must define a **mapping** that aligns variables across configurations before they are combined.
+
+Each row in the mapping table represents one ensemble-level variable:
+
+| Column | Description |
+|--------|-------------|
+| Ensemble variable | The name used in the aggregated output |
+| Per-configuration dropdowns | The corresponding variable in each input configuration |
+
+<Note>
+  All mapped variables should be normalized so that they represent comparable quantities across models. Using observables (derived quantities defined in the model) is recommended when the underlying state variable names differ across configurations.
+</Note>
+
+Click **Add mapping** to add a new row. A mapping row is required for each variable you want to appear in the output dataset.
+
+### Model weights
+
+Under **Model weights**, each input configuration is listed with a **Relative certainty** signal-bar control. The values are the alpha parameters of a Dirichlet distribution — higher values express greater prior confidence in that model. Equal weights mean each configuration contributes proportionally to the ensemble.
+
+### Simulation settings
+
+The same solver settings as the single-model **Simulate** operator apply here: end time, number of samples, solver method, step size, and number of timepoints. See [Simulate — Parameters](/simulation/simulate#parameters).
+
+## Calibrate ensemble
+
+The **Calibrate ensemble** operator fits all configurations to a shared observed dataset at the same time. The inference procedure updates both the parameter distributions within each model and the relative weights of the models. A configuration that fits the data better receives a higher posterior weight.
+
+### Inputs and outputs
+
+| Port | Type | Required |
+|------|------|----------|
+| Dataset | `datasetId` | Yes |
+| Model configuration (×2 or more) | `modelConfigId` | Yes |
+| **Output: Dataset** | `datasetId` | — |
+
+### Variable mapping
+
+The mapping table in the calibrate ensemble operator has one additional column compared to the simulate ensemble:
+
+| Column | Description |
+|--------|-------------|
+| Ensemble variable | Name used in the aggregated output |
+| Dataset column | The observed data column to fit against |
+| Per-configuration dropdowns | The corresponding variable in each input configuration |
+
+The **Timestamp** row (always present) maps the dataset's time column to the ensemble timeline.
+
+### Calibration settings
+
+<Tabs>
+  <Tab title="Preset options">
+    | Preset | Samples | Solver | Iterations | Learning rate |
+    |--------|---------|--------|------------|---------------|
+    | Fast | 1 | `euler` | 10 | 0.1 |
+    | Normal | 10 | `dopri5` | 100 | 0.03 |
+  </Tab>
+  <Tab title="Manual settings">
+    | Parameter | Description |
+    |-----------|-------------|
+    | End time | Final timestep for calibration |
+    | Number of samples (`numParticles`) | Particles used per inference step |
+    | Solver method | `dopri5`, `rk4`, or `euler` |
+    | Step size | Fixed step size for `rk4` / `euler` |
+    | Number of iterations | Gradient update steps |
+    | Learning rate | Optimizer step size |
+  </Tab>
+</Tabs>
+
+## Interpreting ensemble results
+
+After a run completes, the preview panel displays:
+
+- **Variable trajectories** — aggregated trajectory bands for each mapped ensemble variable, reflecting both within-model parametric uncertainty and between-model structural uncertainty
+- **Loss curve** (calibrate ensemble only) — the training loss across iterations, one line per model configuration
+- **Model weights chart** (calibrate ensemble only) — bar chart showing the posterior weight assigned to each configuration after fitting
+
+<Tip>
+  If one model receives a very low posterior weight after calibrate ensemble, consider whether it is structurally inconsistent with the data. You may want to exclude it from further analysis or revisit its parametrization.
+</Tip>
+
+## Saving results
+
+Click **Save for re-use** in the preview header to persist the ensemble output dataset as a named project asset. For calibrate ensemble, the updated per-configuration model configurations are also accessible through the output port.

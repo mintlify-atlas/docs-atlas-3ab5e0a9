@@ -1,0 +1,180 @@
+---
+title: "Deployment"
+description: "Docker Compose architecture, service reference, ports, and environment configuration for running Terarium locally."
+---
+
+Terarium is deployed as a set of Docker containers orchestrated by Docker Compose. The main `deploy/docker-compose.yml` file includes six sub-compose files that each own a layer of the stack.
+
+## Architecture overview
+
+```
+deploy/
+├── docker-compose.yml                        # Root compose file (includes sub-files)
+├── .env                                      # Local environment variables (from .env_template)
+└── scripts/
+    ├── docker-compose-common.yml             # Shared infrastructure (postgres, redis, minio, elasticsearch, rabbitmq, spicedb)
+    ├── docker-compose-keycloak.yml           # Authentication (keycloak)
+    ├── docker-compose-hmi.yml                # Application tier (hmi-server, hmi-client, terarium-docs)
+    ├── docker-compose-data-services.yml      # AI data services (mira, beaker)
+    ├── docker-compose-sim-services.yml       # Simulation engine (pyciemss-api, pyciemss-worker)
+    └── docker-compose-taskrunner.yml         # Background task runners (gollm, mira, funman, ocr-extraction)
+```
+
+All containers run on a shared Docker network named `terarium`.
+
+## Services
+
+### Application tier
+
+| Container | Image | Port | Description |
+|---|---|---|---|
+| `hmi-client` | `ghcr.io/darpa-askem/hmi-client` | `8080` | Vue.js web application (reverse proxy to hmi-server) |
+| `hmi-server` | `ghcr.io/darpa-askem/hmi-server` | `3000` | Spring Boot API server |
+| `terarium-docs` | `ghcr.io/darpa-askem/terarium-docs` | `8082` | In-app help documentation |
+
+### Infrastructure
+
+| Container | Image | Port | Description |
+|---|---|---|---|
+| `postgres` | `postgres:14-alpine` | — | Primary relational database (terarium schema + spicedb schema) |
+| `elasticsearch` | `elasticsearch:8.12.1` | `9200` | Full-text search index |
+| `rabbitmq` | `rabbitmq:3-management-alpine` | `5672` | Message broker for async task queues |
+| `redis` | `redis:7-alpine` | `6379` | Cache and job state store |
+| `minio` | `minio/minio` | `9000` / `9090` | S3-compatible object storage (datasets, simulation results, documents) |
+| `keycloak` | `keycloak/keycloak:26.1` | `8081` | Identity and access management |
+| `spicedb` | `authzed/spicedb:v1.39.1` | `50051` | Fine-grained authorization (Google Zanzibar model) |
+
+### Data and simulation services
+
+| Container | Image | Description |
+|---|---|---|
+| `mira` | `ghcr.io/darpa-askem/mira` | MIRA modeling framework (model transformation, stratification) |
+| `beaker` | `ghcr.io/darpa-askem/askem-beaker` | Jupyter-based notebook environment with AI tool support |
+| `pyciemss-api` | `ghcr.io/darpa-askem/pyciemss-api` | REST API for the CIEMSS simulation engine |
+| `pyciemss-worker` | `ghcr.io/darpa-askem/pyciemss-worker` | CIEMSS background simulation worker |
+
+### Task runners
+
+Task runners are long-lived workers that consume jobs from RabbitMQ. Each runner handles a specific class of AI or scientific task.
+
+| Container | Image | Task type |
+|---|---|---|
+| `gollm-taskrunner` | `ghcr.io/darpa-askem/gollm-taskrunner` | LLM-based knowledge extraction and model enrichment |
+| `mira-taskrunner` | `ghcr.io/darpa-askem/mira-taskrunner` | MIRA model operations |
+| `funman-taskrunner` | `ghcr.io/darpa-askem/funman-taskrunner` | FUNMAN constraint validation |
+| `ocr-extraction-taskrunner` | `ghcr.io/darpa-askem/ocr-extraction-taskrunner` | PDF OCR and document extraction |
+
+## Startup order and health checks
+
+Docker Compose enforces startup ordering through health check dependencies. The dependency chain is:
+
+```
+postgres (healthy)
+  └── keycloak-init (completed)
+        └── keycloak (healthy)
+  └── migrate-spicedb (completed)
+        └── spicedb (healthy)
+  └── minio (healthy)
+        └── migrate-minio (completed)
+  └── elasticsearch (healthy)
+  └── rabbitmq (healthy)
+  └── redis (healthy)
+        └── hmi-server (healthy)
+              └── hmi-client (healthy)
+```
+
+`hmi-server` performs a health check against `http://hmi-server:3000/actuator/health` with up to 30 retries at 3-second intervals and a 5-minute start period. `hmi-client` and `terarium-docs` check `http://localhost:80/healthcheck`.
+
+<Note>
+  On first run, `migrate-minio` downloads and imports a large epidemiology knowledge graph (~several hundred MB) into the `askem-static-storage` bucket. Subsequent starts skip this step if the data already exists.
+</Note>
+
+## Environment variables
+
+Configuration lives in `deploy/.env`. Copy `deploy/.env_template` to `deploy/.env` before starting.
+
+### Required
+
+| Variable | Description |
+|---|---|
+| `secret_openai_key` | OpenAI API key. Used by `gollm-taskrunner`, `ocr-extraction-taskrunner`, and `beaker`. |
+
+### Platform configuration
+
+| Variable | Default | Description |
+|---|---|---|
+| `local_host_name` | `host.docker.internal` | Hostname used by containers to reach the Docker host. Set to `localhost` on Linux. |
+
+```bash
+# .env (macOS)
+local_host_name=host.docker.internal
+secret_openai_key=sk-...
+
+# .env (Linux)
+local_host_name=localhost
+secret_openai_key=sk-...
+```
+
+<Warning>
+  All default passwords in the compose files (`admin123`, `postgres`, `terarium123`, etc.) are hardcoded for local development. Do not use this configuration in a production or internet-facing environment without replacing every default credential.
+</Warning>
+
+### Default service credentials
+
+These credentials are pre-configured in the compose files. They apply only to the local development stack.
+
+| Service | Username | Password |
+|---|---|---|
+| Terarium app (admin) | `adam` | `admin123` |
+| Terarium app (user) | `ursula` | `user123` |
+| Keycloak admin | `admin` | `admin123` |
+| PostgreSQL | `postgres` | `postgres` |
+| MinIO | `admin` | `admin123` |
+| RabbitMQ | `terarium` | `terarium123` |
+
+## Data volumes
+
+Docker named volumes persist data between container restarts:
+
+| Volume | Used by | Contents |
+|---|---|---|
+| `terarium-db` | `postgres` | Application and Keycloak database |
+| `minio-data` | `minio` | Uploaded files, datasets, simulation results, documents |
+| `elasticsearch-data` | `elasticsearch` | Full-text search index |
+
+To reset all data and start fresh:
+
+```bash
+docker compose down -v
+docker compose up -d
+```
+
+<Warning>
+  The `-v` flag removes all named volumes. This permanently deletes all stored data including user accounts, projects, models, and simulation results.
+</Warning>
+
+## Useful commands
+
+```bash
+# Start all services in the background
+docker compose up -d
+
+# Stop all services (preserve data volumes)
+docker compose down
+
+# Tail logs for a specific service
+docker compose logs -f hmi-server
+
+# Check health status of all containers
+docker compose ps
+
+# Restart a single service
+docker compose restart hmi-client
+
+# Pull the latest images and restart
+docker compose pull && docker compose up -d
+```
+
+<Tip>
+  The RabbitMQ management UI is available at [http://localhost:15672](http://localhost:15672) (username: `terarium`, password: `terarium123`) if you expose port `15672` in `docker-compose-common.yml`. By default only port `5672` (AMQP) is mapped.
+</Tip>

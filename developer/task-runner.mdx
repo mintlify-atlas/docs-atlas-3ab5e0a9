@@ -1,0 +1,200 @@
+---
+title: "Task runner"
+description: "How Terarium dispatches and processes long-running AI and computation tasks asynchronously."
+---
+
+The task runner system lets Terarium offload long-running AI and computation tasks (model enrichment, format conversion, parameter validation, document extraction, etc.) to isolated processes without blocking the HTTP server or the user's browser.
+
+## How it works
+
+The task runner uses **RabbitMQ as its sole interface** — it both consumes requests and produces responses through message queues. Each task runner image bundles one or more Python scripts (or standalone executables) that are spawned as child processes.
+
+```
+hmi-server
+  │
+  │  TaskRequest (JSON) ──▶ terarium-request-queue-{type}
+  │
+  ▼
+RabbitMQ
+  │
+  │  ──▶ task runner process
+  │        ├── --input-pipe   (receives serialised input bytes)
+  │        ├── --output-pipe  (writes final result bytes)
+  │        └── --progress-pipe (writes intermediate progress)
+  │
+  │  TaskResponse (JSON) ──▶ terarium-response-exchange
+  │
+  ▼
+hmi-server  (TaskService listener)
+  │
+  ├── runs TaskResponseHandler
+  ├── persists NotificationEvent
+  └── sends ClientEvent via SSE ──▶ browser
+```
+
+### Named pipes
+
+When a task runner receives a request it creates a named pipe specific to the child process. The child script must:
+
+1. Read its input from `--input-pipe`.
+2. Write periodic progress to `--progress-pipe`.
+3. Write the final serialised output to `--output-pipe`.
+
+The `TaskRunnerInterface` base class in `packages/taskrunner/taskrunner.py` provides all scaffolding to do this correctly.
+
+## Task runner images
+
+There are four task runner images, each specialised for a different AI service:
+
+| Image | `TERARIUM_TASKRUNNER_REQUEST_TYPE` | Backed by |
+|-------|-----------------------------------|-----------|
+| `gollm-taskrunner` | `gollm` | GoLLM AI service (OpenAI) |
+| `mira-taskrunner` | `mira` | MIRA REST API |
+| `funman-taskrunner` | `funman` | FUNMAN validation engine |
+| `ocr-extraction-taskrunner` | `ocr_extraction` | OCR / document AI |
+
+Each task runner connects to RabbitMQ and listens on its dedicated request queue (`terarium-request-queue-{type}`).
+
+## RabbitMQ topology
+
+| Queue / Exchange | Type | Purpose |
+|-----------------|------|---------|
+| `terarium-request-queue-{type}` | Queue | Inbound task requests for each task runner type |
+| `terarium-response-exchange` | Direct exchange | Task runners publish results here |
+| `terarium-response-queue` | Queue | One hmi-server instance picks up each response |
+| `terarium-response-broadcast-exchange` | Direct exchange | hmi-server re-broadcasts processed responses to all instances |
+| `terarium-cancellation-exchange` | Direct exchange | Cancellation signals keyed by task UUID |
+
+## Deployment routing key
+
+Every task request and response is stamped with a `deploymentRoutingKey`. This allows multiple isolated deployments (local, staging, prod) to share the same RabbitMQ cluster without cross-contaminating task traffic.
+
+| Environment | Routing key |
+|-------------|-------------|
+| Local dev | `local` |
+| Production | `prod` |
+
+Set via `TERARIUM_TASKRUNNER_DEPLOYMENTROUTINGKEY` on hmi-server and the matching routing key on the task runner containers.
+
+## TaskService internals
+
+`TaskService` (`service/tasks/TaskService.java`) is the Spring service responsible for the full task lifecycle inside hmi-server.
+
+### Key fields
+
+```java
+// Routing key unique to this hmi-server instance (UUID at startup)
+private final String instanceRoutingKey = UUID.randomUUID().toString();
+
+// In-flight futures keyed by task UUID
+private final Map<UUID, CompletableTaskFuture> futures = new ConcurrentHashMap<>();
+
+// Distributed Redis cache for successful responses (12 h TTL, 2 h max-idle)
+private RMapCache<String, TaskResponse> responseCache;
+```
+
+### Submitting a task
+
+```java
+public TaskFuture runTaskAsync(TaskRequest req) throws JsonProcessingException {
+    // 1. Assign a UUID and compute a SHA-256 hash of the request
+    TaskRequestWithId req = new TaskRequestWithId(r, instanceRoutingKey);
+
+    // 2. Check Redis cache — return immediately if an identical task succeeded before
+    TaskResponse cached = responseCache.get(req.getSHA256());
+    if (cached != null) { ... return completed future; }
+
+    // 3. Declare the request queue and a cancellation queue for this task
+    declareQueue(req.getType(), requestQueue);
+    declareAndBindTransientQueueWithRoutingKey(...);
+
+    // 4. Publish the request to RabbitMQ
+    convertAndSendToDefaultExchange(r.getType(), requestQueue, jsonStr);
+
+    // 5. Publish a QUEUED status response immediately
+    convertAndSend(r.getType(), RESPONSE_EXCHANGE, instanceRoutingKey, queuedRespJson);
+
+    // 6. Register a CompletableFuture and return it
+    futures.put(req.getId(), future);
+    return future;
+}
+```
+
+### Response handling
+
+When a response arrives from a task runner:
+
+1. **One** hmi-server instance processes it: runs the registered `TaskResponseHandler`, optionally writes the result to Redis cache, persists a `NotificationEvent`, and sends a `ClientEvent` to the user via SSE.
+2. That instance then **broadcasts** the processed response to all other hmi-server instances via the broadcast exchange so that whichever instance holds the user's SSE connection can forward it.
+
+### Task cancellation
+
+```java
+taskService.cancelTask(TaskType.GOLLM, taskId);
+```
+
+This publishes a cancellation message to `terarium-cancellation-exchange` with a routing key equal to the task UUID. The task runner picks it up and terminates the child process.
+
+### Compound tasks
+
+A `CompoundTask` bundles a primary task with one or more secondary tasks. The primary task is always run synchronously; secondary tasks run in the specified mode (ASYNC or SYNC). This pattern is used for enrichment workflows that chain multiple LLM calls.
+
+## Response handlers
+
+Each response handler is a Spring `@Component` implementing `TaskResponseHandler`. It is registered with `TaskService` in the owning controller's `@PostConstruct` method and is invoked exactly once per task response.
+
+| Handler class | Script name | Integration |
+|---------------|-------------|-------------|
+| `EnrichModelResponseHandler` | `gollm:enrich_model` | GoLLM |
+| `EnrichDatasetResponseHandler` | `gollm:enrich_dataset` | GoLLM |
+| `ConfigureModelFromDocumentResponseHandler` | `gollm:configure_model_from_document` | GoLLM |
+| `ConfigureModelFromDatasetResponseHandler` | `gollm:configure_model_from_dataset` | GoLLM |
+| `CompareModelsResponseHandler` | `gollm:compare_models` | GoLLM |
+| `EquationsFromImageResponseHandler` | `gollm:equations_from_image` | GoLLM |
+| `GenerateSummaryHandler` | `gollm:generate_summary` | GoLLM |
+| `ChartAnnotationResponseHandler` | `gollm:chart_annotation` | GoLLM |
+| `DocumentQuestionHandler` | `gollm:document_question` | GoLLM |
+| `InterventionsFromDocumentResponseHandler` | `gollm:interventions_from_document` | GoLLM |
+| `InterventionsFromDatasetResponseHandler` | `gollm:interventions_from_dataset` | GoLLM |
+| `AMRToMMTResponseHandler` | `mira:amr_to_mmt` | MIRA |
+| `SbmlToPetrinetResponseHandler` | `mira:sbml_to_petrinet` | MIRA |
+| `StellaToStockflowResponseHandler` | `mira:stella_to_stockflow` | MIRA |
+| `MdlToStockflowResponseHandler` | `mira:mdl_to_stockflow` | MIRA |
+| `SimplifyModelResponseHandler` | `mira:simplify_model` | MIRA |
+| `GenerateModelLatexResponseHandler` | `mira:model_to_latex` | MIRA |
+| `CompareModelsConceptsResponseHandler` | `mira:compare_models_concepts` | MIRA |
+| `LatexToAMRResponseHandler` | `mira_task:latex_to_amr` | MIRA |
+| `LatexToSympyResponseHandler` | `gollm:latex_to_sympy` | GoLLM |
+| `SympyToAMRResponseHandler` | `mira_task:sympy_to_amr` | MIRA |
+| `ExtractEquationsResponseHandler` | `ocr_extraction:extract_equations` | OCR |
+| `ExtractTextResponseHandler` | `ocr_extraction:extract_text` | OCR |
+| `ExtractTablesResponseHandler` | `ocr_extraction:extract_tables` | OCR |
+| `OCRExtractionResponseHandler` | `ocr_extraction:ocr` | OCR |
+| `ValidateModelConfigHandler` | `funman:validate_model_config` | FUNMAN |
+| `DatasetStatisticsResponseHandler` | `gollm:dataset_statistics` | GoLLM |
+| `LlmTaskResponseHandler` | (base class) | — |
+
+## Client-side notification events
+
+After a task response is processed, hmi-server sends a typed `ClientEvent` to the user's SSE stream. The event type is looked up from `TaskNotificationEventTypes` based on the script name.
+
+The browser receives these events and updates the corresponding workflow node, notification panel badge, or other UI element without requiring a page reload or polling.
+
+## Response caching
+
+Successful task responses are cached in Redis under a SHA-256 hash of the complete serialised `TaskRequest`. Caching is opt-in — the request must set `useCache = true`.
+
+| Property | Default |
+|----------|---------|
+| TTL | 12 hours (`43200` seconds) |
+| Max idle time | 2 hours (`7200` seconds) |
+
+On local profile startup the cache is automatically cleared to prevent stale results from blocking development.
+
+## Building a new task runner image
+
+1. Implement your task script, reading from `--input-pipe` and writing to `--output-pipe` using `TaskRunnerInterface` from `taskrunner.py`.
+2. Create a `Dockerfile` that installs your dependencies and copies the `taskrunner.py` base alongside your scripts.
+3. Add a new entry to `deploy/scripts/docker-compose-taskrunner.yml` with the appropriate `TERARIUM_TASKRUNNER_REQUEST_TYPE`.
+4. Add a `TaskResponseHandler` in the hmi-server and register it in the relevant controller's `@PostConstruct`.
+5. Add the new `TaskType` enum value to `TaskRequest.TaskType` in the server.

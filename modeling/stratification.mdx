@@ -1,0 +1,134 @@
+---
+title: "Model stratification"
+description: "Split a model's populations into sub-groups by attributes such as age, geography, or vaccination status using the Stratify model operator."
+---
+
+**Stratification** is the process of splitting a model's compartments into finer sub-groups based on one or more categorical attributes. For example, stratifying an SIR model by age group `[Young, Old]` produces a new model with compartments `S_Young`, `S_Old`, `I_Young`, `I_Old`, `R_Young`, and `R_Old`, along with new or modified transitions that govern interactions between these groups.
+
+The output of stratification is a structurally new, more complex AMR model that preserves the mathematical semantics of the original while encoding the chosen heterogeneity.
+
+---
+
+## Stratify model operator
+
+The **Stratify model** operator on the workflow canvas delegates the stratification computation to the MIRA Python library running inside a Beaker kernel.
+
+**Inputs:** `Model` or `Model configuration` — if a model configuration is provided, Terarium creates a temporary model with configured values before stratifying.
+
+**Outputs:** `Model` — a new AMR model with stratified compartments. The original model is never modified.
+
+<Note>
+The Stratify model operator is not runnable on its own. A stratified output is produced when you click **Stratify** in the Wizard tab or run code in the Notebook tab that calls `stratify_request`.
+</Note>
+
+---
+
+## Stratification settings (Wizard tab)
+
+Open the operator panel and configure the following fields before clicking **Stratify**:
+
+<Steps>
+  <Step title="Name the strata dimension">
+    Enter a **name** for the stratification dimension in the "Name of strata" field. This becomes the suffix key attached to each stratified compartment (e.g., `Age`, `Location`).
+  </Step>
+  <Step title="Select variables and parameters to stratify">
+    Use the multi-select dropdown to choose which **state variables** and **parameters** to split. The dropdown is pre-populated with all states and parameters from the input model that appear in at least one rate expression.
+
+    - State variables selected here will be split into one copy per stratum label.
+    - Parameters selected here will also be stratified (one value per stratum).
+    - States or parameters left unselected remain shared across all strata.
+  </Step>
+  <Step title="Enter group labels">
+    Provide a **comma-separated list of labels** for each group. For example: `Young, Old` or `Toronto, Montreal, Vancouver`. The number of labels determines how many copies of each selected variable are created.
+  </Step>
+  <Step title="Configure interaction options">
+    Three checkboxes control how the stratified model's transitions are constructed:
+
+    | Option | MIRA parameter | Effect |
+    |---|---|---|
+    | Create new transitions between strata | `structure = null` | Adds transitions that allow populations to move between strata (e.g., travel, aging) |
+    | Allow existing interactions to involve multiple strata | `cartesian_control = true` | Expands existing transitions so that individuals in any stratum can interact with individuals in any other stratum |
+    | Stratify parameter via multiplication factors | `add_param_factor = true` | Represents stratified parameters as a base value multiplied by per-stratum factors |
+  </Step>
+  <Step title="Run stratification">
+    Click **Stratify**. MIRA executes the stratification and returns the new AMR model. The preview pane on the right updates with the stratified model, and the output is saved automatically.
+  </Step>
+</Steps>
+
+---
+
+## How MIRA stratifies a model
+
+Internally the operator sends a `stratify_request` message to the Beaker kernel with these fields:
+
+```python
+{
+  "key": "Age",                          # strata dimension name
+  "strata": ["Young", "Old"],            # group labels
+  "concepts_to_stratify": ["S", "I"],    # selected state variables
+  "params_to_stratify": ["beta"],        # selected parameters
+  "cartesian_control": True,             # cross-stratum interactions
+  "structure": None,                     # None = all, [] = none
+  "add_param_factor": True               # factored parameter stratification
+}
+```
+
+MIRA constructs the stratified model by:
+
+1. Creating one copy of each selected state variable per stratum label (e.g., `S → S_Young, S_Old`).
+2. Copying and relabeling transitions, assigning them to the appropriate stratum-specific states.
+3. Optionally adding new transitions between strata (controlled by `structure`).
+4. Optionally applying the Cartesian product to existing transitions so that cross-stratum interactions are encoded.
+5. Returning the complete stratified AMR as a new model, which Terarium persists with an auto-generated name such as `SIR Model (stratified Age with 2 groups)`.
+
+---
+
+## Notebook tab
+
+For advanced users, the Notebook tab provides a full Python code editor connected to the same Beaker kernel. You can write arbitrary MIRA stratification code or use the LLM assistant to generate it.
+
+Example LLM prompts for the notebook:
+
+```
+Stratify my model by the ages young and old
+Stratify my model by the locations Toronto and Montreal where Toronto
+and Montreal cannot interact
+Stratify my model by the locations Toronto and Montreal where populations
+within any state are able to travel between Toronto and Montreal
+```
+
+<Tip>
+Use "cannot interact" in your prompt to generate `structure = []`, which creates no new inter-stratum transitions. Use "able to travel" to generate `structure = null`, which creates all possible inter-stratum transitions.
+</Tip>
+
+The notebook emits a `model_preview` message after each successful run, and Terarium automatically saves the result as a new output port.
+
+---
+
+## Understanding the output
+
+The stratified model is a fully valid AMR model — it can be passed directly to any downstream operator that accepts a `Model` input, including:
+
+- **Configure model** — assign per-stratum initial conditions and parameter values
+- **Edit model** — further modify the stratified structure
+- **Simulate** — run the stratified ODE or ensemble simulation
+
+<Warning>
+Stratification can significantly increase model complexity. A model with `n` compartments stratified by `k` groups produces up to `n × k` compartments and a proportionally larger number of transitions and parameters. Verify the resulting model in the preview before saving it for simulation.
+</Warning>
+
+### Grounding and modifiers
+
+After stratification, each stratified state variable carries a `grounding.modifiers` record in the AMR encoding the stratum it belongs to. For example:
+
+```json
+{
+  "id": "I_old",
+  "name": "Infected_old",
+  "grounding": {
+    "modifiers": { "Age": "old" }
+  }
+}
+```
+
+These modifiers are used by Terarium to group simulation outputs and by the `groupVariablesByStrata` utility to aggregate results across strata for charting.

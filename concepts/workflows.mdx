@@ -1,0 +1,124 @@
+---
+title: "Workflows"
+description: "Workflows are visual modeling pipelines built on a directed graph canvas. Each node in the graph is an operator that performs a modeling step; edges carry data between operators."
+---
+
+A workflow lets you compose a full modeling study as a connected sequence of steps — load a model, configure it, run a simulation, calibrate against data, visualize results — all in one reproducible canvas.
+
+## Canvas overview
+
+The workflow canvas is an infinite, pannable surface. Each **node** on the canvas represents an **operator** — a discrete step such as simulating a model or calibrating parameters. **Edges** connect an operator's output port to another operator's input port, passing data (usually an asset ID) from one step to the next.
+
+You can zoom, pan, and rearrange nodes freely. The canvas auto-saves as you work.
+
+## Nodes, ports, and edges
+
+### Nodes (operators)
+
+A node encapsulates one operation. It has:
+
+- A **display name** shown in the card header.
+- One or more **input ports** on the left side — slots that accept data from upstream operators.
+- One or more **output ports** on the right side — slots that emit results to downstream operators.
+- A **status indicator** reflecting whether the operator has been configured and run.
+
+Clicking a node opens its **drilldown panel**, where you configure inputs, set parameters, and trigger execution.
+
+### Ports
+
+Ports are typed — each port accepts or emits a specific kind of data such as `modelConfigId`, `datasetId`, or `simulationId`. An edge can only connect two ports whose types are compatible.
+
+Ports can be:
+
+- **Required** — the operator cannot run without a connected value.
+- **Optional** — the operator can run without this input, but connecting it may enable additional functionality.
+
+### Edges
+
+An edge carries the value from an output port to a connected input port. When you select a new output in an operator (for example, choosing a calibration result), the value propagates automatically through all downstream edges, and downstream operators are marked as needing re-execution.
+
+## Operator status
+
+Every operator displays a status that reflects its current state:
+
+| Status | Meaning |
+|---|---|
+| **Default** | The operator has been placed but not yet configured |
+| **Invalid** | Required inputs are missing or configuration is incomplete |
+| **In progress** | The operator is actively running a computation |
+| **Success** | The operator completed successfully and has a valid output |
+| **Error** | The operator encountered an error during execution |
+
+When an upstream operator's output changes, all downstream operators are automatically reset to **Invalid** so you know they need to be re-run.
+
+## Creating a workflow
+
+<Steps>
+  <Step title="Open the resource sidebar">
+    Inside a project, open the resource sidebar on the left. Click **New workflow** to create a blank workflow and give it a name.
+  </Step>
+  <Step title="Add an asset operator">
+    Right-click the canvas (or drag from the sidebar) to add a **Model**, **Dataset**, or **Document** operator. These asset operators let you select an existing project asset to feed into the pipeline.
+  </Step>
+  <Step title="Connect downstream operators">
+    Hover over an output port and drag to an input port on another operator to create an edge. Terarium only allows connections between compatible port types.
+  </Step>
+  <Step title="Configure and run">
+    Click a runnable operator to open its drilldown panel. Set parameters and click **Run**. When the run completes the operator status changes to **Success** and the output value is available for downstream operators.
+  </Step>
+  <Step title="Branch and explore">
+    You can branch a workflow from any node to explore alternative configurations without losing your existing results.
+  </Step>
+</Steps>
+
+<Note>
+  Workflows auto-layout using a left-to-right directed graph. You can trigger an automatic layout at any time from the canvas toolbar to tidy up complex workflows.
+</Note>
+
+## Available operators
+
+The table below lists all operator types available in Terarium workflows.
+
+| Operator | Type key | Category | Description |
+|---|---|---|---|
+| **Model** | `ModelOperation` | Asset | Select a model from the project to use as an input to downstream operators |
+| **Dataset** | `Dataset` | Asset | Select a dataset from the project |
+| **Document** | `Document` | Asset | Select a document (PDF or paper) from the project |
+| **Code** | `Code` | Asset | Select a code asset from the project |
+| **Configure model** | `ModelConfiguration` | Modeling | Create and edit a model configuration — set initial values and parameter ranges |
+| **Edit model** | `ModelEdit` | Modeling | Modify the model structure, equations, and metadata |
+| **Stratify model** | `StratifyMira` | Modeling | Stratify a model into sub-populations using the MIRA framework |
+| **Compare models** | `ModelComparison` | Modeling | Visually compare two or more models side by side |
+| **Create model from equations** | `ModelFromEquations` | Modeling | Generate a model directly from a set of mathematical equations |
+| **Create intervention policy** | `InterventionPolicy` | Modeling | Define an intervention policy to apply during simulation or optimization |
+| **Simulate** | `SimulateCiemssOperation` | Simulation | Run a probabilistic forward simulation using the CIEMSS engine |
+| **Simulate ensemble** | `SimulateEnsembleCiemms` | Simulation | Run a simulation across an ensemble of model configurations |
+| **Calibrate** | `CalibrationOperationCiemss` | Simulation | Calibrate model parameters against observed dataset values using CIEMSS |
+| **Calibrate ensemble** | `CalibrateEnsembleCiemms` | Simulation | Calibrate across an ensemble of models simultaneously |
+| **Optimize intervention policy** | `OptimizeCiemss` | Simulation | Find the optimal intervention policy given an objective and constraints |
+| **Validate configuration** | `Funman` | Validation | Use FUNMAN to verify that model configurations satisfy scientific constraints |
+| **Transform dataset** | `DatasetTransformer` | Data | Apply transformations to a dataset using AI-assisted or manual operations |
+| **Transform gridded dataset** | `Regridding` | Data | Regrid a geospatial or time-series dataset to a new resolution |
+| **Compare datasets** | `CompareDatasets` | Data | Compare two or more datasets or simulation outputs side by side |
+
+<Info>
+  The `SubsetData` operator type is defined in the system but exposed through the dataset transformer workflow. Use **Transform dataset** when you need to subset rows or columns from a dataset.
+</Info>
+
+## Annotations
+
+You can add text annotations directly on the canvas to document decisions, label groups of operators, or leave notes for collaborators. Annotations are saved with the workflow and visible to all project members.
+
+## Related pages
+
+<CardGroup cols={3}>
+  <Card title="Projects" icon="folder" href="/concepts/projects">
+    Workflows live inside projects
+  </Card>
+  <Card title="Assets" icon="box" href="/concepts/assets">
+    Learn about the data types that flow between operators
+  </Card>
+  <Card title="Simulate" icon="chart-line" href="/simulation/simulate">
+    Run your first simulation from the workflow canvas
+  </Card>
+</CardGroup>

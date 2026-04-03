@@ -1,0 +1,96 @@
+---
+title: "Simulate"
+description: "Run probabilistic forward simulations on a model configuration using the CIEMSS engine."
+---
+
+The **Simulate** operator runs a forward simulation of your model over a specified time horizon. It uses the CIEMSS (Calibrated, Inferential Ensemble Modeling for System Science) probabilistic ODE solver, which produces an ensemble of trajectories rather than a single deterministic path. Each trajectory is one plausible realization drawn from the parameter distributions defined in your model configuration.
+
+## Inputs and outputs
+
+| Port | Type | Required |
+|------|------|----------|
+| Model configuration | `modelConfigId` | Yes |
+| Intervention policy | `policyInterventionId` | No |
+| **Output: Dataset** | `datasetId` | — |
+
+Connect a model configuration node to the **Simulate** operator to provide initial conditions and parameter distributions. Optionally connect an intervention policy to apply time-varying or event-based changes during the simulation. The operator emits a dataset containing all sampled trajectories.
+
+## Running a simulation
+
+<Steps>
+  <Step title="Connect a model configuration">
+    Drag a **Model configuration** node onto the workflow canvas and connect it to the **Simulate** node's input port.
+  </Step>
+  <Step title="Open the settings panel">
+    Click the **Simulate** node to expand it. The **Simulation settings** sidebar opens on the left.
+  </Step>
+  <Step title="Set simulation parameters">
+    Configure the time span and solver options (see [Parameters](#parameters) below).
+  </Step>
+  <Step title="Run">
+    Click **Run**. The operator submits the job to the CIEMSS engine. Progress is shown inline on the node. When complete, trajectory charts appear in the preview panel.
+  </Step>
+  <Step title="Inspect results">
+    Use the **Output settings** sidebar on the right to choose which variables to chart and configure quantile ranges.
+  </Step>
+</Steps>
+
+## Parameters
+
+<Note>
+  Use the **Preset** dropdown to apply a pre-tuned combination of settings. **Fast** uses fewer samples and the Euler solver for quick exploratory runs. **Normal** uses 100 samples with the `dopri5` adaptive solver for higher-fidelity results.
+</Note>
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| End time | `90` | The final simulation timestep. Start time is always `0`. |
+| Number of samples | `100` | How many independent trajectories to draw. More samples give smoother confidence bands but increase runtime. |
+| Solver method | `dopri5` | ODE integration method. Options: `dopri5` (adaptive Runge-Kutta), `rk4` (fixed-step Runge-Kutta), `euler` (explicit Euler). |
+| Solver step size | `0.1` | Fixed step size for `rk4` and `euler`. Ignored when using `dopri5`. |
+| Number of timepoints | Matches end time | How many output timesteps to record. By default this equals the end time, giving one output per time unit. Enable the checkbox to set a custom value. |
+
+<Warning>
+  The `euler` and `rk4` methods require you to choose a step size that is small enough to maintain numerical stability. For stiff models, prefer `dopri5`.
+</Warning>
+
+## Interpreting results
+
+After the run completes, results are displayed in several chart sections. Use the **Output settings** panel to add or remove charts.
+
+### Variables over time
+
+Each variable chart shows all sampled trajectories as a shaded band. The band represents the quantile range across samples—by default the 25th–75th percentile ribbon with the median overlaid. You can adjust quantile bounds in the **Quantile settings** section of the output panel.
+
+### Interventions over time
+
+If you connected an intervention policy, an additional section shows the value of each intervened parameter or state variable at each timestep, so you can verify that the intervention was applied correctly.
+
+### Comparison charts
+
+Comparison charts overlay two or more variables on a single axis, useful for checking relationships (for example, susceptible vs. infectious populations in an SIR model).
+
+### Sensitivity analysis
+
+The sensitivity section shows how much a selected output variable at a given timepoint depends on each model parameter. Three views are available:
+
+- **Line chart** — mean output value as a function of each parameter
+- **Ranking chart** — parameters ranked by their influence on the output
+- **Scatter chart** — one point per sample, colored by parameter value
+
+<Tip>
+  If the sensitivity charts do not appear, make sure you have selected at least one output variable and at least one input parameter in the output settings panel.
+</Tip>
+
+### Data table view
+
+Switch to the **Data** view (the list icon next to the chart icon) to browse the raw CSV output produced by the simulation run.
+
+## Saving results
+
+Click **Save for re-use** in the preview header to persist the simulation dataset as a named project asset. Saved datasets can be used as inputs to calibration or other downstream operators.
+
+## Chart controls and annotations
+
+Each chart has an expand icon (top-right corner) that opens the chart in a full-screen overlay. The embed actions menu (three-dot icon) provides options to export the chart as PNG or SVG.
+
+You can add annotations to **Variables over time** and **Comparison** charts by opening the **Output settings** panel, selecting a chart, and using the annotation editor. Annotations are stored with the node state and persist across sessions.
